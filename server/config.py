@@ -58,6 +58,7 @@ DEFAULTS = {
     "hud_widgets": "time,today,countdown,song,focus",  # 功能面板启用的部件
     "song_autodetect": True,        # 歌曲部件：用系统 SMTC 自动检测当前播放（关＝纯手动填写）
     "editor_ruled_lines": False,    # 写作区信纸横线（随滚动对齐行高）
+    "ai_timeout": 300,              # AI 单次请求超时（秒）：本地大模型首字慢，60s 会被中途掐断
     "config_version": CONFIG_VERSION,
 }
 

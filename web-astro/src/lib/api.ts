@@ -216,7 +216,8 @@ export interface Session {
 
 // SSE 事件：refs(一次) / delta(多次) / done / error
 export interface StreamEvent {
-  type: 'refs' | 'delta' | 'done' | 'error';
+  // status：后端阶段进度（prepare / connect / generating），用于等待 UI 显示真实进度
+  type: 'refs' | 'delta' | 'done' | 'error' | 'status';
   data: unknown;
 }
 
@@ -810,6 +811,8 @@ export const api = {
       instruction?: string;
       scope?: string;
       provider_id?: string | null;
+      /** 附加生成参数（如 target_words 目标字数） */
+      params?: Record<string, unknown> | null;
     },
     onEvent: (ev: StreamEvent) => void,
     signal?: AbortSignal
@@ -823,7 +826,8 @@ export const api = {
         instruction: payload.instruction ?? '',
         scope: payload.scope ?? 'chapter',
         provider_id: payload.provider_id ?? null,
-        params: {},
+        // 必须透传：以前写死 {} 会把前端的目标篇幅等参数静默丢掉
+        params: payload.params ?? {},
       });
       fetch(`${BASE}/ai/ops/operate`, {
         method: 'POST',

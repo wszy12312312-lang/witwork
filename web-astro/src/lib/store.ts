@@ -447,8 +447,11 @@ export async function loadProviders() {
   try {
     store.providers = await api.providers();
     if (!store.draftProviderId) {
-      const def = store.providers.find((p) => p.is_default && p.enabled)
-        || store.providers.find((p) => p.enabled);
+      // 兜底优先真实模型：mock 是离线演示占位，常排在最前，直接取第一个会
+      // 让没设默认模型的用户点「生成」得到「演示模式」占位回复。
+      const enabled = store.providers.filter((p) => p.enabled);
+      const real = enabled.filter((p) => p.kind !== 'mock');
+      const def = enabled.find((p) => p.is_default) || real[0] || enabled[0];
       store.draftProviderId = def ? def.id : null;
     }
   } catch {
@@ -618,6 +621,8 @@ export async function aiOperate(
     instruction?: string;
     scope?: string;
     provider_id?: string | null;
+    /** 附加生成参数（如 target_words 目标字数），透传到后端 */
+    params?: Record<string, unknown> | null;
   },
   onEvent: (ev: StreamEvent) => void
 ): Promise<void> {

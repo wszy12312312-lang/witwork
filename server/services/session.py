@@ -47,7 +47,11 @@ def _resolve_provider(provider_id):
     for p in enabled:
         if p["id"] == dpid:
             return p
-    return enabled[0] if enabled else None
+    if not enabled:
+        return None
+    # 与 ai_ops 保持一致：兜底避开 mock 演示占位模型
+    real = [p for p in enabled if (p.get("kind") or "").lower() != "mock"]
+    return real[0] if real else enabled[0]
 
 
 def _retrieve_and_persona(session_id, user_content, book_id=None):

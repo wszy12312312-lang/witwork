@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onBeforeUnmount } from 'vue';
 import { store, aiOperate, stopAiOperate } from '../lib/store';
+import AiWaiting from './AiWaiting.vue';
 
 const props = defineProps<{
   bookId: number | null;
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 }>();
 
 type Op = 'rewrite' | 'continue' | 'expand' | 'shrink' | 'create' | 'review' | 'gen_outline' | 'gen_from_outline';
+type Stage = 'idle' | 'prepare' | 'connect' | 'generating';
 
 const OPS: { key: Op; label: string; need: 'sel' | 'none' | 'book'; desc: string }[] = [
   { key: 'rewrite', label: '改写', need: 'sel', desc: '按方向改写选中文字（无选区则改整章）' },
@@ -32,16 +34,57 @@ const OPS: { key: Op; label: string; need: 'sel' | 'none' | 'book'; desc: string
   { key: 'gen_from_outline', label: '按大纲写', need: 'none', desc: '按本章大纲生成完整正文（替换整章）' },
 ];
 
+// 支持「目标篇幅」的操作：给模型明确的字数指令，避免写得过短或注水
+const LENGTH_OPS: Op[] = ['continue', 'create', 'gen_from_outline'];
+const LENGTHS = [
+  { v: 0, label: '自动' },
+  { v: 500, label: '约 500 字' },
+  { v: 1000, label: '约 1000 字' },
+  { v: 2000, label: '约 2000 字' },
+];
+
 const op = ref<Op>(props.initialOp || 'rewrite');
 const instruction = ref('');
 const result = ref('');
 const done = ref(false);
+const targetWords = ref(0);
+
+// ---- 生成过程反馈：阶段 + 计时 ----
+const stage = ref<Stage>('idle');
+const elapsedMs = ref(0);
+const finalElapsedMs = ref(0);
+const resultChars = ref(0);
+let ticker: number | null = null;
+let t0 = 0;
+
+function startTicker() {
+  stopTicker();
+  t0 = performance.now();
+  elapsedMs.value = 0;
+  ticker = window.setInterval(() => {
+    elapsedMs.value = performance.now() - t0;
+  }, 100);
+}
+function stopTicker() {
+  if (ticker !== null) {
+    window.clearInterval(ticker);
+    ticker = null;
+  }
+}
+onBeforeUnmount(stopTicker);
 
 const enabledProviders = computed(() => store.providers.filter((p) => p.enabled));
 const hasSel = computed(() => props.selStart !== props.selEnd && props.selEnd > props.selStart);
 const selLen = computed(() => (hasSel.value ? props.selEnd - props.selStart : 0));
 
 const curOp = computed(() => OPS.find((o) => o.key === op.value)!);
+const showLength = computed(() => LENGTH_OPS.includes(op.value));
+const runDisabled = computed(() => !props.chapterId || !enabledProviders.value.length);
+const runHint = computed(() => {
+  if (!props.chapterId) return '请先打开一个章节';
+  if (!enabledProviders.value.length) return '无可用模型，请到设置中添加';
+  return '';
+});
 const applyLabel = computed(() => {
   if (op.value === 'gen_outline') return '写入大纲';
   if (op.value === 'gen_from_outline') return '替换整章';
@@ -65,6 +108,11 @@ async function run() {
   if (store.streaming) return;
   result.value = '';
   done.value = false;
+  finalElapsedMs.value = 0;
+  resultChars.value = 0;
+  stage.value = 'prepare';
+  startTicker();
+
   const o = op.value;
   let text = '';
   let scope = 'chapter';
@@ -79,6 +127,7 @@ async function run() {
   } else {
     text = props.fullText; // 整章
   }
+
   await aiOperate(
     {
       operation: o,
@@ -88,13 +137,27 @@ async function run() {
       instruction: instruction.value,
       scope,
       provider_id: store.draftProviderId ?? null,
+      params: { target_words: targetWords.value || 0 },
     },
     (ev) => {
-      if (ev.type === 'delta') result.value += (ev.data as string) || '';
-      else if (ev.type === 'error') result.value = '⚠ ' + (ev.data as string);
-      else if (ev.type === 'done') done.value = true;
+      if (ev.type === 'delta') {
+        result.value += (ev.data as string) || '';
+      } else if (ev.type === 'status') {
+        const d = ev.data as { stage?: string } | null;
+        if (d?.stage) stage.value = d.stage as Stage;
+      } else if (ev.type === 'error') {
+        result.value = '⚠ ' + (ev.data as string);
+      } else if (ev.type === 'done') {
+        done.value = true;
+        const d = ev.data as { elapsed_ms?: number; chars?: number } | null;
+        finalElapsedMs.value = d?.elapsed_ms ?? elapsedMs.value;
+        resultChars.value = d?.chars ?? result.value.length;
+      }
     }
   );
+
+  stopTicker();
+  stage.value = 'idle';
   done.value = true;
 }
 
@@ -143,6 +206,11 @@ watch(
   () => store.streaming,
   (s) => {
     if (s) done.value = false;
+    else {
+      // 被停止或异常结束：收掉计时器与阶段态
+      stopTicker();
+      stage.value = 'idle';
+    }
   }
 );
 </script>
@@ -197,23 +265,52 @@ watch(
       ></textarea>
     </div>
 
-    <div class="aw-btns">
-      <button v-if="store.streaming" class="stop" @click="stopAiOperate">■ 停止</button>
-      <button v-else class="run" :disabled="!props.chapterId" @click="run">生成 ✦</button>
+    <div v-if="showLength" class="aw-len">
+      <span class="ln-label">篇幅</span>
+      <button
+        v-for="l in LENGTHS"
+        :key="l.v"
+        class="ln-btn"
+        :class="{ on: targetWords === l.v }"
+        :disabled="store.streaming"
+        @click="targetWords = l.v"
+      >{{ l.label }}</button>
     </div>
 
-    <div v-if="store.aiError" class="aw-err">⚠ {{ store.aiError }}</div>
+    <div class="aw-btns">
+      <button v-if="store.streaming" class="stop" @click="stopAiOperate">■ 停止</button>
+      <button v-else class="run" :disabled="runDisabled" :title="runHint" @click="run">生成 ✦</button>
+      <span v-if="runHint && !store.streaming" class="run-hint">{{ runHint }}</span>
+    </div>
+
+    <!-- threeui 风格等待面板：只要还在生成就常驻，首字之后自动切换为「输出中」 -->
+    <div v-if="store.streaming" class="aw-wait">
+      <AiWaiting
+        :stage="stage"
+        :elapsed-ms="elapsedMs"
+        :has-text="!!result"
+        :op-label="curOp.label"
+        @stop="stopAiOperate"
+      />
+    </div>
+
+    <div v-if="store.aiError" class="aw-err">
+      <span>⚠ {{ store.aiError }}</span>
+      <button class="retry" @click="run">重试</button>
+    </div>
 
     <div class="aw-result" v-if="result">
-      <pre class="aw-text">{{ stripFences(result) }}</pre>
-      <div class="aw-result-btns" v-if="done && op !== 'review'">
+      <pre class="aw-text" :class="{ typing: store.streaming }">{{ stripFences(result) }}</pre>
+      <div class="aw-meta mono" v-if="done && !store.streaming">
+        耗时 {{ (finalElapsedMs / 1000).toFixed(1) }}s · 约 {{ resultChars }} 字
+      </div>
+      <div class="aw-result-btns" v-if="done && !store.streaming && op !== 'review'">
         <button class="apply" @click="apply">{{ applyLabel }}</button>
         <button class="cp" @click="copyRes">复制</button>
       </div>
-      <div class="aw-result-btns" v-else-if="done && op === 'review'">
+      <div class="aw-result-btns" v-else-if="done && !store.streaming && op === 'review'">
         <button class="cp" @click="copyRes">复制全部意见</button>
       </div>
-      <div class="aw-hint" v-if="!done && store.streaming">生成中…</div>
     </div>
   </section>
 </template>
@@ -343,12 +440,51 @@ watch(
 .aw-ta:disabled {
   opacity: 0.6;
 }
+.aw-len {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 8px;
+  flex-wrap: wrap;
+}
+.ln-label {
+  font-size: 12px;
+  color: var(--theme-muted);
+  margin-right: 2px;
+}
+.ln-btn {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--theme-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--theme-ink-soft);
+}
+.ln-btn:hover:not(:disabled) {
+  border-color: var(--theme-accent);
+  color: var(--theme-accent-hover);
+}
+.ln-btn.on {
+  border-color: var(--theme-accent);
+  background: var(--theme-field);
+  color: var(--theme-accent-hover);
+}
+.ln-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .aw-btns {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   padding: 0 14px 10px;
   border-bottom: 1px solid var(--theme-line);
+}
+.run-hint {
+  font-size: 11.5px;
+  color: var(--theme-muted);
+  margin-right: auto;
 }
 .run,
 .stop {
@@ -377,13 +513,35 @@ watch(
 .stop:hover {
   background: color-mix(in srgb, var(--theme-error) 12%, transparent);
 }
+.aw-wait {
+  padding: 10px 14px 2px;
+}
 .aw-err {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   color: var(--theme-error);
   font-size: 12.5px;
   background: color-mix(in srgb, var(--theme-error) 12%, transparent);
   padding: 8px 10px;
   margin: 8px 14px;
   border-radius: var(--radius-sm);
+}
+.aw-err span {
+  flex: 1;
+  min-width: 0;
+}
+.retry {
+  flex: none;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--theme-error);
+  background: transparent;
+  color: var(--theme-error);
+}
+.retry:hover {
+  background: color-mix(in srgb, var(--theme-error) 16%, transparent);
 }
 .aw-result {
   flex: 1;
@@ -408,6 +566,29 @@ watch(
   border-radius: var(--radius-sm);
   background: var(--theme-field);
   color: var(--theme-ink);
+}
+/* 流式输出中：末尾一道光标，明确「还在写」 */
+.aw-text.typing {
+  border-color: color-mix(in srgb, var(--theme-accent) 55%, var(--theme-line));
+}
+.aw-text.typing::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--theme-accent);
+  animation: caret 1s steps(1, end) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+.aw-meta {
+  font-size: 11.5px;
+  color: var(--theme-muted);
 }
 .aw-result-btns {
   display: flex;
@@ -438,10 +619,5 @@ watch(
 .cp:hover {
   border-color: var(--theme-accent);
   color: var(--theme-accent-hover);
-}
-.aw-hint {
-  font-size: 12px;
-  color: var(--theme-muted);
-  text-align: center;
 }
 </style>

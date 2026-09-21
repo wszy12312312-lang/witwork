@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
 import {
   store,
   openSession,
@@ -11,11 +11,44 @@ import {
   type SessionMessage,
   type Citation,
 } from '../lib/store';
+import AiWaiting from './AiWaiting.vue';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const input = ref('');
 const box = ref<HTMLElement | null>(null);
+
+// ---- 等待反馈：与 AI 写作共用 threeui 等待面板 ----
+const elapsedMs = ref(0);
+let ticker: number | null = null;
+let t0 = 0;
+function stopTicker() {
+  if (ticker !== null) {
+    window.clearInterval(ticker);
+    ticker = null;
+  }
+}
+const liveText = computed(() => {
+  const m = store.sessionMessages.find((mm) => isLive(mm));
+  return ((m?.content) || '').length > 0;
+});
+const waitStage = computed(() => (liveText.value ? 'generating' : 'connect'));
+watch(
+  () => store.streaming,
+  (s) => {
+    if (s) {
+      stopTicker();
+      t0 = performance.now();
+      elapsedMs.value = 0;
+      ticker = window.setInterval(() => {
+        elapsedMs.value = performance.now() - t0;
+      }, 100);
+    } else {
+      stopTicker();
+    }
+  }
+);
+onBeforeUnmount(stopTicker);
 
 const enabledProviders = computed(() => store.providers.filter((p) => p.enabled));
 const activeSession = computed(() => store.sessions.find((s) => s.id === store.currentSessionId) || null);
@@ -114,16 +147,23 @@ watch(() => store.currentSessionId, () => scrollToEnd());
                 <span class="rs">{{ c.section_title }}</span>
               </div>
             </div>
-            <div v-if="m.role === 'assistant' && isLive(m) && !m.content" class="thinking">
-              思考中<span class="cur">▍</span>
-            </div>
-            <pre v-else class="ctext">{{ m.content }}</pre>
+            <pre class="ctext">{{ m.content }}</pre>
             <div v-if="m.role === 'assistant' && m.token_count" class="tok">
               ≈{{ m.token_count }} tokens
             </div>
           </div>
         </div>
       </template>
+      <!-- threeui 等待面板：等首字期间显示真实耗时与阶段，不再只有一行「思考中」 -->
+      <div v-if="store.streaming" class="ai-wait">
+        <AiWaiting
+          :stage="waitStage"
+          :elapsed-ms="elapsedMs"
+          :has-text="liveText"
+          op-label="协作"
+          @stop="stopStreaming"
+        />
+      </div>
       <div v-if="store.aiError" class="ai-err">⚠ {{ store.aiError }}</div>
     </div>
 
@@ -374,6 +414,9 @@ watch(() => store.currentSessionId, () => scrollToEnd());
   font-size: 10.5px;
   color: var(--theme-muted);
   font-family: var(--font-mono);
+}
+.ai-wait {
+  padding: 8px 12px 2px;
 }
 .ai-err {
   color: var(--theme-error);
