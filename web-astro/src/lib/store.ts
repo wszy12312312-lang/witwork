@@ -194,8 +194,19 @@ export async function openNewVolume(bookId: number, title: string) {
 
 // ---- 章节 ----
 export async function openChapter(chapterId: number) {
-  store.currentChapterId = chapterId;
-  store.currentChapter = await api.chapter(chapterId);
+  try {
+    store.currentChapterId = chapterId;
+    store.currentChapter = await api.chapter(chapterId);
+  } catch (e) {
+    // 章节（或其所属作品）已被删除：后端会 404。清空编辑区回到空态，
+    // 而不是把上一章的内容继续挂在界面上。
+    console.warn('openChapter 失败，章节不可见：', e);
+    store.currentChapterId = null;
+    store.currentChapter = null;
+    store.snapshots = [];
+    store.saveStatus = 'saved';
+    return;
+  }
   store.currentChapterId = chapterId;
   store.saveStatus = 'saved';
   await loadSnapshots(chapterId);
@@ -253,13 +264,16 @@ export async function diffSnapshot(sid: number): Promise<{ type: string; text: s
 // ---- 回收站 ----
 export async function trashBook(id: number) {
   await api.trash(id);
-  if (store.currentBookId === id) {
+  await loadBooks();
+  // 兜底清理：只要当前编辑区指向的作品已不在可见列表（无论删除的是哪本书、
+  // 状态是否一致），一律复位编辑区。否则会出现"作品都删了，原文还挂在编辑器"。
+  if (store.currentBookId !== null && !store.books.some((b) => b.id === store.currentBookId)) {
     store.currentBookId = null;
     store.currentBook = null;
     store.currentChapterId = null;
     store.currentChapter = null;
+    store.snapshots = [];
   }
-  await loadBooks();
   await loadTrash();
 }
 

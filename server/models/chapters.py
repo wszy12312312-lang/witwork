@@ -29,8 +29,12 @@ def list_chapters(book_id, conn=None, include_trashed=False):
             sql += " WHERE c.book_id=?"
             args = (book_id,)
         else:
+            # 三重可见性：章节自己没删 + 所属卷没删 + 所属作品没删。
+            # 漏掉第三条时，删掉整个作品后其章节仍会被列出（"作品删了原文还在"）。
             sql += (" WHERE c.deleted_at IS NULL "
                     "AND (c.volume_id IS NULL OR v.deleted_at IS NULL) "
+                    "AND NOT EXISTS (SELECT 1 FROM books b WHERE b.id = c.book_id "
+                    "                AND b.deleted_at IS NOT NULL) "
                     "AND c.book_id=?")
             args = (book_id,)
         sql += " ORDER BY c.sort_order, c.id"

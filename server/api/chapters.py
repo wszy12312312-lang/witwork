@@ -9,7 +9,9 @@ router = APIRouter(prefix="/chapters", tags=["chapters"])
 @router.post("")
 def create_chapter(payload: dict):
     book_id = payload.get("book_id")
-    if not book_m.get_book(book_id):
+    book = book_m.get_book(book_id) if book_id else None
+    # 回收站中的作品不允许再新建章节（对外与已删作品相关的读写一律 404）
+    if not book or book.get("deleted_at"):
         raise HTTPException(404, "book not found")
     return chap_m.create_chapter(
         book_id,
@@ -20,19 +22,30 @@ def create_chapter(payload: dict):
     )
 
 
-@router.get("/{chapter_id}")
-def get_chapter(chapter_id: int):
+def _visible_chapter_or_404(chapter_id: int) -> dict:
+    """取「对外可见」的章节：章节自己没删，且所属作品没删。
+
+    修复"作品删了原文还在"：软删除只标记 books.deleted_at，章节记录还在，
+    之前 GET/PUT /chapters/{id} 不校验所属作品，导致已删作品的正文仍能被
+    打开、被自动保存写回。统一在这里拦截。
+    """
     ch = chap_m.get_chapter(chapter_id)
-    if not ch:
+    if not ch or ch.get("deleted_at"):
+        raise HTTPException(404, "chapter not found")
+    book = book_m.get_book(ch.get("book_id"))
+    if not book or book.get("deleted_at"):
         raise HTTPException(404, "chapter not found")
     return ch
 
 
+@router.get("/{chapter_id}")
+def get_chapter(chapter_id: int):
+    return _visible_chapter_or_404(chapter_id)
+
+
 @router.put("/{chapter_id}")
 def update_chapter(chapter_id: int, payload: dict):
-    ch = chap_m.get_chapter(chapter_id)
-    if not ch:
-        raise HTTPException(404, "chapter not found")
+    ch = _visible_chapter_or_404(chapter_id)
     before = ch.get("content") or ""
     updated = chap_m.update_chapter(chapter_id, payload)
     after = updated.get("content") or ""
@@ -65,9 +78,7 @@ def restore_chapter(chapter_id: int):
 
 @router.post("/{chapter_id}/snapshots")
 def create_snapshot(chapter_id: int, payload: dict):
-    ch = chap_m.get_chapter(chapter_id)
-    if not ch:
-        raise HTTPException(404, "chapter not found")
+    ch = _visible_chapter_or_404(chapter_id)
     return snap_m.create_snapshot(
         ch["book_id"],
         chapter_id,

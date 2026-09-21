@@ -322,7 +322,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         </div>
       </div>
 
-      <div class="editor-main" :class="['vm-' + viewMode, { ruled: store.editorRuledLines }]">
+      <div class="editor-main" :class="{ ruled: store.editorRuledLines }">
+        <!-- 标题行：章节标题 + 视图切换同行左右分布，垂直居中，互不重叠 -->
+        <div class="chap-row">
+          <input class="chap-title" v-model="title" @input="onInput" placeholder="章节标题" />
+          <div class="view-switch" role="group" aria-label="视图切换">
+            <button class="vs" :class="{ on: viewMode === 'edit' }" @click="setView('edit')" title="仅编辑">编辑</button>
+            <button class="vs" :class="{ on: viewMode === 'preview' }" @click="setView('preview')" title="仅预览">预览</button>
+            <button class="vs" :class="{ on: viewMode === 'split' }" @click="setView('split')" title="编辑与预览同时显示">分屏</button>
+            <button class="vs ruled-toggle" :class="{ on: store.editorRuledLines }" @click="toggleRuled" title="写作区信纸横线">横线</button>
+          </div>
+        </div>
+        <div class="editor-cols" :class="['vm-' + viewMode]">
         <div v-show="showEditor" class="editor-left">
           <div v-if="showOutline" class="outline-box">
             <div class="ob-head">
@@ -335,7 +346,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             </div>
             <textarea class="ob-ta" v-model="outline" @input="onOutlineInput" placeholder="写本节大纲，或点「想法转大纲」让 AI 生成…"></textarea>
           </div>
-          <input class="chap-title" v-model="title" @input="onInput" placeholder="章节标题" />
           <textarea
             class="chap-body"
             v-model="content"
@@ -356,13 +366,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             :cursor-index="cursorIndex"
           />
         </div>
-        <!-- 视图切换浮在编辑区右上角：不受工具栏换行影响，任何窗口尺寸都可见 -->
-        <div class="view-switch" role="group" aria-label="视图切换">
-          <button class="vs" :class="{ on: viewMode === 'edit' }" @click="setView('edit')" title="仅编辑">编辑</button>
-          <button class="vs" :class="{ on: viewMode === 'preview' }" @click="setView('preview')" title="仅预览">预览</button>
-          <button class="vs" :class="{ on: viewMode === 'split' }" @click="setView('split')" title="编辑与预览同时显示">分屏</button>
-        <button class="vs ruled-toggle" :class="{ on: store.editorRuledLines }" @click="toggleRuled" title="写作区信纸横线">横线</button>
-        </div>
+        </div><!-- /editor-cols -->
       </div>
 
       <div class="editor-foot">
@@ -867,29 +871,39 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 }
 .editor-main {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  min-height: 0;
+}
+/* 编辑/预览双列区（标题行在其上方，全宽） */
+.editor-cols {
+  flex: 1;
   display: grid;
   grid-template-columns: 1fr 300px;
   gap: 12px;
-  padding: 12px 14px;
   min-height: 0;
-  position: relative; /* 视图切换浮层的定位基准 */
 }
-/* 浮在编辑区右上角：绝对定位，窗口缩放/工具栏换行都不会把它挤掉 */
+/* 标题行：标题 + 视图切换左右分布、垂直居中、互不重叠 */
+.chap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+/* 视图切换改为标题行右侧的行内元素：任何视图模式下都可见、不遮标题 */
 .view-switch {
-  position: absolute;
-  top: 14px;
-  right: 20px;
-  z-index: 4;
+  flex: none;
   display: flex;
   border: 1px solid var(--theme-line);
   border-radius: 4px;
   overflow: hidden;
   background: color-mix(in srgb, var(--theme-paper) var(--panel-alpha), transparent);
-  box-shadow: 0 2px 10px rgba(8, 10, 8, 0.14);
 }
 /* 三态视图：分屏=双列；编辑/预览=单列 */
-.editor-main.vm-edit,
-.editor-main.vm-preview {
+.editor-cols.vm-edit,
+.editor-cols.vm-preview {
   grid-template-columns: 1fr;
 }
 .editor-left {
@@ -899,10 +913,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   gap: 8px;
 }
 .chap-title {
-  font-size: 18px;
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
   font-weight: 700;
-  /* 右侧留出空间，避免被右上角的视图切换浮层遮住标题文字 */
-  padding: 8px 190px 8px 10px;
+  padding: 6px 12px 6px 10px;
   border: 1px solid var(--theme-line);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--theme-field) var(--field-alpha), transparent);
@@ -985,7 +1000,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   color: var(--theme-accent-hover);
 }
 @media (max-width: 900px) {
-  .editor-main {
+  .editor-cols {
     grid-template-columns: 1fr;
   }
   .editor-right {

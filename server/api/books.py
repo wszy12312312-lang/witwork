@@ -33,7 +33,9 @@ def get_trash():
 @router.get("/{book_id}")
 def get_book(book_id: int):
     book = book_m.get_book(book_id)
-    if not book:
+    # 已删除（回收站中）的作品对外不可见：否则删掉作品后，
+    # 前端仍能通过旧 id 把「原文」重新打开，表现为"作品都删了原文还在"。
+    if not book or book.get("deleted_at"):
         raise HTTPException(404, "book not found")
     volumes = book_m.list_volumes(book_id)
     chapters = chap_m.list_chapters(book_id)
