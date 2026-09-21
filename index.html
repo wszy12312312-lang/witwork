@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>万维文 WitWork · 本地优先的人机协作写作系统</title>
+<meta name="description" content="万维文 WitWork：本地优先的人机实时协作写作系统。AI 长篇写作、自有世界观知识库、跨章一致性管理，全部在本机运行，离线可用、无云端、不上传任何数据。" />
+<style>
+/* ============ 设计令牌（与项目 tokens.css 保持一致：暖色暗调 + 暖杏金） ============ */
+:root{
+  --paper:#14130f; --paper-raised:#1d1b16;
+  --ink:#ece7d9; --ink-soft:#cbc3b0; --ink-mute:#a49b86;
+  --accent:#c9a468; --accent-hover:#dcb87e; --accent-strong:#b8935c;
+  --line:#38332a; --muted:#8b8271;
+  --panel:#191712; --field:#211e18;
+  --solid-bg:#d6c6a4; --solid-fg:#17150f; --solid-hover:#e3d6b8;
+  --success:#9fc98a;
+  --radius:10px; --radius-sm:6px;
+  --motion:cubic-bezier(0.22,1,0.36,1);
+  --font:"MiSans","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --mono:ui-monospace,"SFMono-Regular","Cascadia Code",Menlo,Consolas,monospace;
+  --maxw:1080px;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--font); font-size:16px; line-height:1.75;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+a{color:inherit;text-decoration:none}
+h1,h2,h3{line-height:1.25;margin:0;letter-spacing:-.01em}
+p{margin:0}
+ul{margin:0;padding:0;list-style:none}
+
+/* ============ 背景：缓慢漂移的暖色光斑（纯 CSS，无图片） ============ */
+.aurora{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden}
+.aurora i{position:absolute;display:block;border-radius:50%;filter:blur(90px);opacity:.5}
+.aurora i:nth-child(1){
+  width:52vw;height:52vw;left:-10vw;top:-14vw;
+  background:radial-gradient(circle at 30% 30%, rgba(201,164,104,.30), transparent 62%);
+  animation:drift1 26s var(--motion) infinite alternate;
+}
+.aurora i:nth-child(2){
+  width:46vw;height:46vw;right:-12vw;top:24vh;
+  background:radial-gradient(circle at 60% 40%, rgba(143,160,106,.20), transparent 64%);
+  animation:drift2 32s var(--motion) infinite alternate;
+}
+.aurora i:nth-child(3){
+  width:40vw;height:40vw;left:24vw;bottom:-16vw;
+  background:radial-gradient(circle at 50% 50%, rgba(185,147,92,.18), transparent 66%);
+  animation:drift3 38s var(--motion) infinite alternate;
+}
+@keyframes drift1{to{transform:translate3d(7vw,5vh,0) scale(1.14)}}
+@keyframes drift2{to{transform:translate3d(-6vw,-7vh,0) scale(1.1)}}
+@keyframes drift3{to{transform:translate3d(5vw,-6vh,0) scale(1.16)}}
+/* 细网格，呼应「档案纸」质感 */
+.grid-bg{
+  position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(56,51,42,.30) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(56,51,42,.30) 1px,transparent 1px);
+  background-size:64px 64px;
+  mask-image:radial-gradient(ellipse 80% 60% at 50% 30%, #000 30%, transparent 78%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 30%, #000 30%, transparent 78%);
+}
+
+.wrap{position:relative;z-index:1;max-width:var(--maxw);margin:0 auto;padding:0 24px}
+
+/* ============ 顶部导航 ============ */
+.nav{
+  position:sticky;top:0;z-index:20;
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  background:color-mix(in srgb,var(--paper) 82%,transparent);
+  border-bottom:1px solid var(--line);
+}
+.nav .wrap{display:flex;align-items:center;gap:16px;height:60px}
+.brand{display:flex;align-items:baseline;gap:8px;font-weight:700;letter-spacing:.02em}
+.brand b{font-size:17px}
+.brand .en{font-size:12px;color:var(--muted);font-family:var(--mono);letter-spacing:.08em}
+.nav nav{margin-left:auto;display:flex;gap:22px;font-size:14px;color:var(--ink-soft)}
+.nav nav a{position:relative;padding:4px 0;transition:color .25s var(--motion)}
+.nav nav a::after{
+  content:"";position:absolute;left:0;right:100%;bottom:0;height:1px;
+  background:var(--accent);transition:right .3s var(--motion);
+}
+.nav nav a:hover{color:var(--accent-hover)}
+.nav nav a:hover::after{right:0}
+
+/* ============ Hero ============ */
+.hero{padding:96px 0 72px;text-align:center}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent);padding:6px 14px;border:1px solid var(--line);
+  border-radius:999px;background:var(--panel);margin-bottom:26px;
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--success);
+  box-shadow:0 0 0 4px color-mix(in srgb,var(--success) 26%,transparent)}
+.hero h1{font-size:clamp(40px,7.2vw,76px);font-weight:800;letter-spacing:-.02em}
+.hero h1 .en{
+  display:block;font-family:var(--mono);font-size:clamp(16px,2.4vw,24px);
+  font-weight:500;letter-spacing:.3em;color:var(--accent);margin-top:10px;
+}
+.tagline{font-size:clamp(17px,2.4vw,22px);color:var(--accent-hover);margin:22px 0 8px;font-weight:600}
+.lede{max-width:660px;margin:0 auto;color:var(--ink-soft);font-size:16.5px}
+.cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin:34px 0 26px}
+.facts{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.facts li{padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel)}
+
+/* ============ 按钮 ============ */
+.btn{
+  display:inline-flex;align-items:center;gap:9px;cursor:pointer;
+  font-family:inherit;font-size:15px;font-weight:600;
+  padding:13px 26px;border-radius:var(--radius-sm);border:1px solid transparent;
+  transition:transform .22s var(--motion),background .22s var(--motion),
+             border-color .22s var(--motion),box-shadow .22s var(--motion);
+}
+.btn .arrow{transition:transform .28s var(--motion)}
+.btn:hover .arrow{transform:translateX(4px)}
+.btn:active{transform:translateY(1px) scale(.985)}
+.btn.primary{
+  background:var(--solid-bg);color:var(--solid-fg);
+  box-shadow:0 10px 30px color-mix(in srgb,var(--accent) 22%,transparent);
+}
+.btn.primary:hover{background:var(--solid-hover);transform:translateY(-2px);
+  box-shadow:0 16px 40px color-mix(in srgb,var(--accent) 32%,transparent)}
+.btn.ghost{border-color:var(--line);color:var(--ink-soft);background:var(--panel)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent-hover);transform:translateY(-2px)}
+
+/* ============ 区块 ============ */
+section{padding:76px 0}
+.sec-head{max-width:680px;margin-bottom:38px}
+.sec-head h2{font-size:clamp(26px,4vw,38px);font-weight:750}
+.sec-head p{color:var(--ink-mute);margin-top:12px;font-size:15.5px}
+.kicker{
+  font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:12px;
+}
+
+/* 卡片 */
+.grid{display:grid;gap:18px}
+.grid.cols-2{grid-template-columns:repeat(2,1fr)}
+.grid.cols-3{grid-template-columns:repeat(3,1fr)}
+.card{
+  padding:24px;border:1px solid var(--line);border-radius:var(--radius);
+  background:linear-gradient(180deg,var(--paper-raised),var(--panel));
+  transition:transform .3s var(--motion),border-color .3s var(--motion),
+             box-shadow .3s var(--motion);
+}
+.card:hover{
+  transform:translateY(-4px);border-color:var(--accent-strong);
+  box-shadow:0 18px 44px rgba(0,0,0,.42);
+}
+.card .ico{
+  width:40px;height:40px;border-radius:var(--radius-sm);
+  display:grid;place-items:center;font-size:19px;
+  background:color-mix(in srgb,var(--accent) 14%,transparent);
+  border:1px solid var(--line);margin-bottom:14px;
+}
+.card h3{font-size:17px;margin-bottom:8px;color:var(--ink)}
+.card p{color:var(--ink-mute);font-size:14.5px;line-height:1.7}
+
+/* 特性列表 */
+.feat{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.feat li{
+  padding:20px 22px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel);transition:border-color .3s var(--motion),transform .3s var(--motion);
+}
+.feat li:hover{border-color:var(--accent-strong);transform:translateY(-3px)}
+.feat strong{display:block;color:var(--ink);font-size:15.5px;margin-bottom:6px}
+.feat span{color:var(--ink-mute);font-size:14px}
+.feat li::before{
+  content:"";display:block;width:22px;height:2px;border-radius:2px;
+  background:var(--accent);margin-bottom:12px;transition:width .3s var(--motion);
+}
+.feat li:hover::before{width:38px}
+
+/* 步骤 */
+.steps{counter-reset:s;display:grid;gap:16px}
+.steps li{
+  counter-increment:s;position:relative;padding:20px 22px 20px 66px;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);
+  transition:border-color .3s var(--motion),transform .3s var(--motion);
+}
+.steps li:hover{border-color:var(--accent-strong);transform:translateX(4px)}
+.steps li::before{
+  content:counter(s);position:absolute;left:20px;top:20px;
+  width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--mono);font-size:13px;font-weight:700;
+  color:var(--solid-fg);background:var(--accent);
+}
+.steps strong{display:block;color:var(--ink);margin-bottom:4px}
+.steps span{color:var(--ink-mute);font-size:14.2px}
+
+/* 命令行 + 复制 */
+.term{
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--field);overflow:hidden;margin-top:20px;
+}
+.term-bar{
+  display:flex;align-items:center;gap:8px;padding:10px 14px;
+  border-bottom:1px solid var(--line);background:var(--paper-raised);
+}
+.term-bar .t{width:10px;height:10px;border-radius:50%;background:var(--line-2,#423d31)}
+.term-bar span{margin-left:6px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.term-body{
+  display:flex;align-items:center;gap:12px;padding:16px 16px;flex-wrap:wrap;
+}
+.term-body code{
+  font-family:var(--mono);font-size:14px;color:var(--ink);flex:1;min-width:220px;
+  word-break:break-all;
+}
+.term-body code::before{content:"$ ";color:var(--accent)}
+.copy{
+  font-family:var(--font);font-size:13px;padding:7px 14px;cursor:pointer;
+  border:1px solid var(--line);border-radius:var(--radius-sm);
+  background:transparent;color:var(--ink-soft);
+  transition:border-color .24s var(--motion),color .24s var(--motion),transform .24s var(--motion);
+}
+.copy:hover{border-color:var(--accent);color:var(--accent-hover)}
+.copy:active{transform:scale(.96)}
+.copy.done{border-color:var(--success);color:var(--success)}
+
+/* 页脚 */
+footer{border-top:1px solid var(--line);padding:44px 0 56px;color:var(--muted);font-size:14px}
+footer .wrap{display:flex;gap:18px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+footer strong{color:var(--ink)}
+footer a{color:var(--accent);transition:color .24s var(--motion)}
+footer a:hover{color:var(--accent-hover)}
+
+/* ============ 滚动进入：淡入上移 ============ */
+.reveal{opacity:0;transform:translateY(26px);
+  transition:opacity .7s var(--motion),transform .7s var(--motion)}
+.reveal.in{opacity:1;transform:none}
+/* 交错延迟 */
+.reveal[data-d="1"]{transition-delay:.08s}
+.reveal[data-d="2"]{transition-delay:.16s}
+.reveal[data-d="3"]{transition-delay:.24s}
+.reveal[data-d="4"]{transition-delay:.32s}
+
+/* ============ 移动端适配 ============ */
+@media (max-width:900px){
+  .grid.cols-3{grid-template-columns:1fr}
+  .feat{grid-template-columns:1fr}
+  .grid.cols-2{grid-template-columns:1fr}
+}
+@media (max-width:720px){
+  body{font-size:15.5px}
+  .nav nav{display:none}
+  .hero{padding:64px 0 48px}
+  section{padding:52px 0}
+  .wrap{padding:0 18px}
+  .btn{width:100%;justify-content:center}
+  .cta{flex-direction:column;align-items:stretch}
+  .term-body code{font-size:13px}
+  footer .wrap{flex-direction:column;align-items:flex-start}
+}
+
+/* ============ 无障碍：尊重系统「减少动态效果」偏好 ============ */
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{
+    animation-duration:.001ms !important;animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+  }
+  .reveal{opacity:1 !important;transform:none !important}
+  .aurora i{animation:none !important}
+}
+</style>
+</head>
+<body>
+
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="grid-bg" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="wrap">
+    <div class="brand"><b>万维文</b><span class="en">WitWork</span></div>
+    <nav>
+      <a href="#why">为什么是它</a>
+      <a href="#features">能力</a>
+      <a href="#writing">写作体验</a>
+      <a href="#start">开始使用</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- Hero -->
+  <section class="hero wrap">
+    <p class="eyebrow reveal"><span class="dot"></span>本地优先 · 离线可用 · 数据不出本机</p>
+    <h1 class="reveal" data-d="1">万维文<span class="en">Wit Work Word</span></h1>
+    <p class="tagline reveal" data-d="2">万维文 AI 写作：汇万千思路，写一纸文章。</p>
+    <p class="lede reveal" data-d="3">
+      AI 长篇写作 × 自有世界观知识库 × 跨章一致性管理，
+      全部在你自己的机器上完成。<b>离线可用，无云端参与，不上传任何数据。</b>
+    </p>
+    <div class="cta reveal" data-d="4">
+      <a class="btn primary" href="#start">三分钟开始 <span class="arrow">→</span></a>
+      <a class="btn ghost" href="#features">看看它能做什么</a>
+    </div>
+    <ul class="facts reveal" data-d="4">
+      <li>本地 SQLite 单一真源</li>
+      <li>Word / Markdown / EPUB 导出</li>
+      <li>Windows · macOS · Linux</li>
+    </ul>
+  </section>
+
+  <!-- 为什么是它 -->
+  <section id="why" class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Why</div>
+      <h2>为什么是它</h2>
+      <p>市面上大多数 AI 写作工具在帮你写第 500 字时很好用，写到第 5 万字时就开始失忆。万维文从一开始就为长篇而生。</p>
+    </div>
+    <div class="grid cols-2">
+      <article class="card reveal" data-d="1">
+        <div class="ico">🔒</div>
+        <h3>数据不出本机</h3>
+        <p>作品、设定、人物、密钥全部存在本地 SQLite 与配置文件里，断网照写。没有账号，没有同步，也不会有「服务器正在维护」。</p>
+      </article>
+      <article class="card reveal" data-d="2">
+        <div class="ico">🧠</div>
+        <h3>为长篇而生</h3>
+        <p>不是一次性聊天补全。人物状态、伏笔生命周期、时间线、地理规则会持续作用于后续每一章的生成与检索。</p>
+      </article>
+      <article class="card reveal" data-d="3">
+        <div class="ico">📚</div>
+        <h3>世界观真正参与写作</h3>
+        <p>知识库分域收拢设定与素材，向量 + 关键词双路检索；嵌入模型缺失时自动降级为关键词方案，离线即开即用。</p>
+      </article>
+      <article class="card reveal" data-d="4">
+        <div class="ico">🖊️</div>
+        <h3>写作体验不将就</h3>
+        <p>信纸横线、专注 HUD、逐稿历史与快照、统一全书标点的中文排版引擎——写字这件事本身被认真对待。</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- 能力 -->
+  <section id="features" class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Features</div>
+      <h2>能力总览</h2>
+      <p>从第一次灵感闪现，到最后一稿导出成书，整条链路上都有趁手的工具。</p>
+    </div>
+    <ul class="feat">
+      <li class="reveal" data-d="1">
+        <strong>流式 AI 协作</strong>
+        <span>本地模型（如 Ollama）或任意 OpenAI 兼容服务，续写 / 润色 / 扩写 / 缩写 / 改写。</span>
+      </li>
+      <li class="reveal" data-d="2">
+        <strong>右键即写</strong>
+        <span>在正文里选中一段、右键选择扩写 / 缩写 / 修改 / 续写，AI 直接作用于你的选区。</span>
+      </li>
+      <li class="reveal" data-d="3">
+        <strong>大纲驱动成文</strong>
+        <span>写下想法 → AI 生成章节大纲 → 再据大纲扩写成完整正文。先有骨架还是先有正文，随你。</span>
+      </li>
+      <li class="reveal" data-d="4">
+        <strong>通读全书</strong>
+        <span>让 AI 读完整部作品，按「问题 → 位置 → 修改建议」给出可执行的修改意见。</span>
+      </li>
+      <li class="reveal" data-d="1">
+        <strong>一致性管理</strong>
+        <span>人物卡自动按章节正文匹配出场；伏笔贯穿 planned → planted → resolved 全生命周期。</span>
+      </li>
+      <li class="reveal" data-d="2">
+        <strong>异写归一与节奏</strong>
+        <span>异写归一、爽点节奏分析、跨章搜索替换，防止写到后面忘了前面。</span>
+      </li>
+      <li class="reveal" data-d="3">
+        <strong>多格式导出</strong>
+        <span>Word / Markdown / EPUB / 设定 MD·JSON / TXT，导出前经排版引擎修正标点、引号与段首缩进。</span>
+      </li>
+      <li class="reveal" data-d="4">
+        <strong>备份与恢复</strong>
+        <span>一键打包数据库与配置；恢复前自动再打一份 pre-restore 备份，误操作可逆。</span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- 写作体验 -->
+  <section id="writing" class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Workspace</div>
+      <h2>写作环境</h2>
+      <p>安静，但什么都在手边。</p>
+    </div>
+    <div class="grid cols-3">
+      <article class="card reveal" data-d="1">
+        <h3>三态视图</h3>
+        <p>纯写作 / 手机稿预览 / 分屏，右上角一键切换。预览会按手机稿形态分页，写网文时心里有数。</p>
+      </article>
+      <article class="card reveal" data-d="2">
+        <h3>功能面板 HUD</h3>
+        <p>时钟、今日事项、日程倒计时、歌曲识别（含封面 / 旋律可视化 / 音量 / 换曲）、专注时长。</p>
+      </article>
+      <article class="card reveal" data-d="3">
+        <h3>逐稿可回溯</h3>
+        <p>自动历史栈 + 手动快照，任意一步都能撤回；AI 落笔前也会先留一份，放心让它改。</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- 开始使用 -->
+  <section id="start" class="wrap">
+    <div class="sec-head reveal">
+      <div class="kicker">Get started</div>
+      <h2>三分钟上手</h2>
+      <p>不需要注册，不需要配服务器，把仓库拉下来就能写。</p>
+    </div>
+    <ol class="steps">
+      <li class="reveal" data-d="1">
+        <strong>双击 start.bat</strong>
+        <span>首次运行自动建立 Python 虚拟环境并安装依赖；服务起来后自动打开浏览器到本机地址。再次双击只会新开一个标签页。</span>
+      </li>
+      <li class="reveal" data-d="2">
+        <strong>拉取一个本地模型</strong>
+        <span>装好 Ollama 后拉取模型，然后在「AI 助手」里选中 Provider、点「测试」即可。</span>
+      </li>
+      <li class="reveal" data-d="3">
+        <strong>开始写第一章</strong>
+        <span>写完几百字后，试着选中一段右键「扩写」，或者点大纲让 AI 先替你搭骨架。</span>
+      </li>
+    </ol>
+
+    <div class="term reveal" data-d="4">
+      <div class="term-bar"><i class="t"></i><i class="t"></i><i class="t"></i><span>terminal</span></div>
+      <div class="term-body">
+        <code id="cmd">ollama pull qwen3:14b</code>
+        <button class="copy" id="copyBtn" type="button">复制</button>
+      </div>
+    </div>
+
+    <div class="cta reveal" style="justify-content:flex-start;margin-bottom:0">
+      <a class="btn primary" href="#why">再看看它的取舍 <span class="arrow">↓</span></a>
+      <a class="btn ghost" href="#features">回到能力清单</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <strong>万维文 WitWork</strong> · 本地优先的人机实时协作写作系统<br />
+      非商业许可证（NC）：可自用、可修改、可免费分发，禁止商业使用。
+    </div>
+    <div>完整使用手册见仓库内 <a href="./使用说明.md">使用说明.md</a></div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- 滚动进入：淡入上移（IntersectionObserver） ---- */
+  var items = document.querySelectorAll('.reveal');
+  if (reduce || !('IntersectionObserver' in window)) {
+    for (var i = 0; i < items.length; i++) items[i].classList.add('in');
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+    for (var j = 0; j < items.length; j++) io.observe(items[j]);
+  }
+
+  /* ---- 背景轻微视差：滚动时光斑缓慢位移 ---- */
+  if (!reduce) {
+    var aurora = document.querySelector('.aurora');
+    var ticking = false;
+    var onScroll = function () {
+      var y = window.pageYOffset || document.documentElement.scrollTop;
+      if (aurora) aurora.style.transform = 'translate3d(0,' + (y * 0.06) + 'px,0)';
+      ticking = false;
+    };
+    window.addEventListener('scroll', function () {
+      if (!ticking) { ticking = true; window.requestAnimationFrame(onScroll); }
+    }, { passive: true });
+  }
+
+  /* ---- 复制按钮微交互 ---- */
+  var btn = document.getElementById('copyBtn');
+  var cmd = document.getElementById('cmd');
+  if (btn && cmd) {
+    var reset;
+    btn.addEventListener('click', function () {
+      var text = cmd.textContent.trim();
+      var done = function () {
+        btn.classList.add('done');
+        btn.textContent = '已复制';
+        clearTimeout(reset);
+        reset = setTimeout(function () {
+          btn.classList.remove('done');
+          btn.textContent = '复制';
+        }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (err) { /* ignore */ }
+        document.body.removeChild(ta);
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

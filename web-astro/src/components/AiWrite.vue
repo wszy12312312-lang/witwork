@@ -130,6 +130,15 @@ async function copyRes() {
   }
 }
 
+// 【修复】抽屉已打开时再触发右键菜单，initialOp 会变化
+// 但组件不会重新挂载，若不同步就会导致「点了扩写没反应」。
+watch(
+  () => props.initialOp,
+  (o) => {
+    if (o) op.value = o;
+  }
+);
+
 watch(
   () => store.streaming,
   (s) => {
