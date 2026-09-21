@@ -103,6 +103,7 @@ export const store = reactive({
   editorFontSize: 18,
   editorLineHeight: 1.8,
   editorPageWidth: 720,
+  editorRuledLines: false,
   backups: [] as BackupItem[],
   settingsError: '',
   roles: [] as RoleTemplate[],
@@ -111,7 +112,7 @@ export const store = reactive({
   aiPanelSide: 'left',
   aiOpen: false,
   // ---- 表层 UI / 功能面板 ----
-  topbarAlpha: 78, // 顶栏操作层不透明度（0-100），所有预设通用
+  topbarAlpha: 78, // 界面统一不透明度（0-100）：顶栏 + 面板 + 内嵌区 + 抽屉一起变（历史键名 topbar_alpha 保留兼容）
   hudEnabled: false, // 功能面板开关
   hudTexture: true, // 面板质感（扫线）
   hudWidgets: 'time,today,countdown,song,focus', // 功能面板启用的部件
@@ -1436,6 +1437,7 @@ function applySettings() {
   store.editorFontSize = Number(c['editor_font_size'] ?? 18);
   store.editorLineHeight = Number(c['editor_line_height'] ?? 1.8);
   store.editorPageWidth = Number(c['editor_page_width'] ?? 720);
+  store.editorRuledLines = Boolean(c['editor_ruled_lines'] ?? false);
   store.layoutScheme = (c['layout_scheme'] as string) || 'A';
   store.aiPanelSide = (c['ai_panel_side'] as string) || 'left';
   store.topbarAlpha = clampNum(c['topbar_alpha'], 78, 0, 100);

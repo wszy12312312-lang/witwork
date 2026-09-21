@@ -174,7 +174,7 @@ async function toggleAutodetect(on: boolean) {
 
 // ---------- 歌曲：封面 / 传输控制 / 音量 / 旋律可视化 ----------
 // 封面：后端把当前曲目缩略图缓存为 PNG，按版本号 bust 前端缓存
-const coverUrl = computed(() => (store.songCoverVersion ? '/song/cover?v=' + store.songCoverVersion : ''));
+const coverUrl = computed(() => (store.songCoverVersion ? '/api/song/cover?v=' + store.songCoverVersion : ''));
 const coverOk = ref(true);
 watch(() => store.songCoverVersion, () => { coverOk.value = true; });
 
@@ -415,28 +415,40 @@ onBeforeUnmount(() => {
           <div class="song-info mono">
             <span>
               <template v-if="detected">{{ detected.playing ? '播放中' : statusText(detected.status) }}</template>
-              <template v-else-if="store.songError">检测不可用</template>
               <template v-else>— 无播放 —</template>
             </span>
             <span v-if="detected">{{ fmtTime(detected.position) }} / {{ fmtTime(detected.duration) }}</span>
             <span v-if="detected && detected.appId" class="src">{{ appLabel(detected.appId) }}</span>
           </div>
-          <!-- 传输控制 + 音量 -->
+          <!-- 传输控制 + 音量：按钮组整体居中，音量靠右 -->
           <div class="song-ctrls" v-if="detected">
-            <button class="cp" title="上一首" @click="songCtrl('prev')">⏮</button>
-            <button class="cp play" :title="playing ? '暂停' : '播放'" @click="playPause">
-              <span v-if="playing">⏸</span><span v-else>▶</span>
-            </button>
-            <button class="cp" title="下一首" @click="songCtrl('next')">⏭</button>
+            <span class="spacer" aria-hidden="true"></span>
+            <div class="cp-group">
+              <button class="cp" title="上一首" aria-label="上一首" @click="songCtrl('prev')">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6v12H5V6h2zm12 0v12L9 12l10-6z"/></svg>
+              </button>
+              <button class="cp play" :title="playing ? '暂停' : '播放'" aria-label="播放或暂停" @click="playPause">
+                <svg v-if="playing" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.4v14H7zM13.6 5H17v14h-3.4z"/></svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+              <button class="cp" title="下一首" aria-label="下一首" @click="songCtrl('next')">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6v12h2V6h-2zM5 6v12l10-6z"/></svg>
+              </button>
+            </div>
             <div class="vol">
               <span class="vol-ic">🔊</span>
               <input type="range" min="0" max="100" step="1" v-model.number="volModel"
                 :disabled="!volAvailable"
-                :title="volAvailable ? ('音量 ' + volModel + '%') : '本机不支持音量控制'" />
+                :title="volAvailable ? ('音量 ' + volModel + '%') : (store.songVolume?.installing ? '正在安装音量组件…' : '本机不支持音量控制')" />
             </div>
           </div>
-          <div v-if="detected && volAvailable === false" class="song-err mono">本机不支持音量控制（需 pycaw）</div>
-          <div v-if="store.songError" class="song-err mono" :title="store.songError">检测不可用，可在设置关闭自动检测</div>
+          <div v-if="detected && volAvailable === false" class="song-err mono" :class="{ installing: store.songVolume?.installing }">
+            {{ store.songVolume?.installing
+              ? '正在自动安装音量控制组件（pycaw）…装好后即可拖动调音量'
+              : (store.songVolume?.need_pycaw
+                  ? '本机不支持音量控制（需 pycaw）'
+                  : '当前无播放中的音频，暂不可调音量') }}
+          </div>
         </template>
 
         <!-- 手动：只读展示，编辑在「设置 → 偏好」 -->
@@ -660,27 +672,49 @@ onBeforeUnmount(() => {
 }
 .song-info .src { margin-left: auto; color: var(--theme-accent); }
 .song-ctrls { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+/* threeui 风格：磨砂胶囊包裹传输控制；主按钮用强调色渐变 + 弹性按压 */
+.cp-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--theme-field) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-line) 85%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent), 0 3px 10px color-mix(in srgb, #000 22%, transparent);
+}
 .cp {
   width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
-  border: 1px solid var(--theme-line);
+  border: 1px solid transparent;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--theme-field) 80%, transparent);
-  color: var(--theme-ink);
-  font-size: 11px;
+  background: color-mix(in srgb, var(--theme-paper) 32%, transparent);
+  color: var(--theme-ink-soft);
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--theme-ink) 12%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  transition: transform 0.12s var(--motion), border-color 0.2s var(--motion), color 0.2s var(--motion);
+  transition: transform 0.18s var(--motion), color 0.2s var(--motion), background 0.2s var(--motion), box-shadow 0.2s var(--motion);
 }
-.cp:hover { border-color: var(--theme-accent); color: var(--theme-accent-hover); }
-.cp:active { transform: scale(0.88); }
+.cp svg { width: 13px; height: 13px; fill: currentColor; display: block; }
+.cp:hover {
+  color: var(--theme-accent-hover);
+  background: color-mix(in srgb, var(--theme-accent) 16%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--theme-accent) 45%, transparent);
+}
+.cp:active { transform: scale(0.85); }
 .cp.play {
-  width: 30px; height: 30px;
-  color: var(--theme-accent);
-  border-color: color-mix(in srgb, var(--theme-accent) 55%, var(--theme-line));
-  background: color-mix(in srgb, var(--theme-accent) 12%, var(--theme-field));
+  width: 31px; height: 31px;
+  color: var(--theme-solid-fg);
+  background: linear-gradient(180deg, var(--theme-accent-hover), var(--theme-accent));
+  box-shadow: 0 5px 15px color-mix(in srgb, var(--theme-accent) 45%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 28%, transparent);
 }
+.cp.play svg { width: 15px; height: 15px; }
+.cp.play:hover {
+  color: var(--theme-solid-fg);
+  background: linear-gradient(180deg, var(--theme-accent-hover), var(--theme-accent-strong));
+  box-shadow: 0 7px 19px color-mix(in srgb, var(--theme-accent) 55%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 32%, transparent);
+}
+.cp.play:active { transform: scale(0.9); }
 .vol { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; margin-left: 2px; }
 .vol-ic { font-size: 11px; opacity: 0.7; flex: none; }
 .vol input[type='range'] { flex: 1; min-width: 0; height: 4px; accent-color: var(--theme-accent); }
@@ -692,6 +726,8 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* pycaw 自动安装中属于正常过程，不做成刺眼的红色 */
+.song-err.installing { color: var(--theme-muted); }
 .melody { width: 100%; height: 22px; display: block; }
 .melody.paused { opacity: 0.5; }
 .melody rect { transition: height 0.12s linear, y 0.12s linear; }

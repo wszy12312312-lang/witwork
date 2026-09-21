@@ -91,6 +91,8 @@ export interface SongVolume {
   level: number; // 0-100
   muted: boolean;
   error?: string;
+  installing?: boolean; // pycaw 缺失、后台自动安装中
+  need_pycaw?: boolean; // 真正缺 pycaw（与「有 pycaw 但无播放会话」区分）
 }
 
 export interface HistoryStatus {
@@ -689,8 +691,10 @@ export const api = {
   songRefresh: () => send<NowPlaying>('/song/refresh', 'POST'),
   // 传输控制（play/pause/toggle/next/prev）+ 封面 + 音量
   songControl: (action: SongAction) => send<{ ok: boolean; error?: string }>('/song/control', 'POST', { action }),
-  songCoverUrl: (version: number) => `/song/cover?v=${version}`,
-  songVolume: () => getJSON<SongVolume>('/song/volume'),
+  // 封面走 /api 前缀（此前漏掉 /api 导致 img 404，部件永远显示音符占位）
+  songCoverUrl: (version: number) => `/api/song/cover?v=${version}`,
+  // 音量读取必须带上当前播放 App 的 appId（此前漏传导致永远「未找到音频会话」）
+  songVolume: (appId = '') => getJSON<SongVolume>(`/song/volume?app_id=${encodeURIComponent(appId)}`),
   songVolumeSet: (appId: string, level: number) => send<SongVolume>('/song/volume', 'POST', { app_id: appId, level }),
 
   // 快照

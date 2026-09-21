@@ -22,6 +22,7 @@ import base64
 import queue
 import threading
 import time
+import sys
 
 _CACHE_TTL = 1.5          # 秒；小于前端轮询间隔即可
 _REQ_TIMEOUT = 2.5        # 单次请求最长等多久
@@ -121,8 +122,10 @@ class _SmtcThread(threading.Thread):
             if size <= 0 or size > 8 * 1024 * 1024:  # 防御：超过 8MB 不当封面
                 return None
             reader = DataReader(stream.get_input_stream_at(0))
-            await reader.load_async(size)
-            buf = bytearray(size)
+            loaded = await reader.load_async(size)  # 实际读到的字节数可能小于请求值
+            if not loaded or loaded < 64:  # 太小不可能是有效图片
+                return None
+            buf = bytearray(loaded)
             reader.read_bytes(buf)
             return bytes(buf)
         except Exception:
@@ -195,16 +198,21 @@ class _SmtcThread(threading.Thread):
             best, best_obj = sessions[0][1], sessions[0][0]
 
         # ---- 封面缓存：仅当曲目签名变化才重读缩略图 ----
+        # 注意：读取失败（如播放器还没准备好封面）不锁定签名，下次轮询会自动重试；
+        # 版本号只在真正拿到封面时 +1，前端据此把「音符占位」换成封面图。
         global _cover_bytes, _cover_sig, _cover_version
         if best is not None:
             sig = "%s|%s|%s" % (best["appId"], best["title"], best["artist"])
             if sig != _cover_sig:
                 try:
-                    _cover_bytes = await _SmtcThread._read_cover(best_obj)
+                    data = await _SmtcThread._read_cover(best_obj)
                 except Exception:
-                    _cover_bytes = None
-                _cover_sig = sig
-                _cover_version += 1
+                    data = None
+                if data:
+                    _cover_bytes = data
+                    _cover_sig = sig
+                    _cover_version += 1
+                # 失败时不写 _cover_sig → 下一轮轮询继续重试
         else:
             if _cover_sig:
                 _cover_bytes = None
@@ -309,66 +317,122 @@ def get_cover_version() -> int:
 
 
 # ----------------------------------------------------------------------------
-# 音量控制（当前播放 App 的音频会话）。需 pycaw（缺失则不可用），全部失败降级。
+# 音量控制（当前播放 App 的音频会话）。需 pycaw；缺失时后台自动 pip 安装一次。
 # ----------------------------------------------------------------------------
-def _match_audio_session(app_id: str):
-    """按 SMTC 的 appId 匹配到 pycaw 音频会话（best-effort）。"""
-    try:
-        from pycaw.pycaw import AudioUtilities
-    except Exception:
-        return None
-    target = (app_id or "").lower()
-    segs = [s for s in target.replace("!", ".").split(".") if s]
-    for s in AudioUtilities.GetAllSessions():
+# pycaw 安装状态：missing（未装）→ installing（后台安装中）→ ready / failed
+_pycaw_state = "missing"
+_pycaw_lock = threading.Lock()
+_pycaw_started = False
+
+
+def _install_pycaw_async():
+    """首次发现缺 pycaw 时，后台线程 pip 安装（整个进程只尝试一次，避免轮询刷 pip）。"""
+    global _pycaw_state, _pycaw_started
+    with _pycaw_lock:
+        if _pycaw_started or _pycaw_state in ("installing", "ready"):
+            return
+        _pycaw_started = True
+        _pycaw_state = "installing"
+
+    def _worker():
+        global _pycaw_state
         try:
-            p = s.Process
+            import subprocess
+            import sys
+
+            r = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "pycaw", "psutil"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if r.returncode == 0:
+                import importlib
+
+                importlib.import_module("pycaw.pycaw")  # 装完先试 import，能过才算 ready
+                _pycaw_state = "ready"
+            else:
+                _pycaw_state = "failed"
         except Exception:
-            p = None
-        if not p:
-            continue
-        name = (p.name() or "").lower()
-        if not name:
-            continue
-        # 桌面程序 appId 多为 "Xxx.exe"：精确比对进程名
-        if target.endswith(".exe") and name == target:
-            return s
-        # UWP / 其他：取 appId 各段做包含匹配（如 cloudmusic）
-        if any(seg and seg in name for seg in segs):
-            return s
-    return None
+            _pycaw_state = "failed"
+
+    threading.Thread(target=_worker, daemon=True, name="inkrealm-pycaw-install").start()
 
 
-def get_volume(app_id: str = ""):
-    """读取当前播放 App 的音量。返回 {available, level(0-100), muted, error}。"""
+def _pycaw_unavailable() -> dict:
+    """pycaw 导入失败时的统一返回；Windows 下会顺带触发自动安装。"""
+    import sys
+
+    if sys.platform == "win32":
+        _install_pycaw_async()
+        if _pycaw_state == "installing":
+            return {
+                "available": False,
+                "level": 0,
+                "muted": False,
+                "installing": True,
+                "error": "正在自动安装音量控制组件（pycaw），稍等片刻即可使用",
+            }
+        return {
+            "available": False,
+            "level": 0,
+            "muted": False,
+            "installing": False,
+            "error": "pycaw 自动安装失败，请手动执行：pip install pycaw",
+        }
+    return {"available": False, "level": 0, "muted": False, "error": "音量控制仅支持 Windows"}
+
+
+# ----------------------------------------------------------------------------
+# 音量控制：全部 COM 枚举 / 读 / 写都隔离在独立子进程（见 smtc_volume_worker.py）。
+# 主进程只做「pycaw 是否可用」的轻量检查（不碰 COM 对象，安全），并触发一次自动安装；
+# 真正的音量读写交给子进程，子进程崩了也不影响写作后端。
+import os as _os
+import json as _json
+import subprocess as _subprocess
+
+_WORKER_PATH = _os.path.join(_os.path.dirname(__file__), "smtc_volume_worker.py")
+
+
+def _run_volume_worker(mode, app_id="", level=None):
+    """在独立子进程里读 / 写音量，崩溃隔离。返回 {available, level, muted, ...}。"""
     try:
-        from pycaw.pycaw import AudioUtilities  # noqa: F401
+        cmd = [sys.executable, _WORKER_PATH, mode, app_id or ""]
+        if level is not None:
+            cmd.append(str(int(level)))
+        r = _subprocess.run(
+            cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=10,
+        )
+    except _subprocess.TimeoutExpired:
+        return {"available": False, "level": 0, "muted": False, "error": "音量读取超时（已隔离，不影响写作）"}
     except Exception as e:
-        return {"available": False, "level": 0, "muted": False, "error": "pycaw 不可用：%s" % e}
+        return {"available": False, "level": 0, "muted": False, "error": "音量组件调用失败：%s" % e}
+    if r.returncode != 0:
+        return {"available": False, "level": 0, "muted": False, "error": "音量组件异常退出（已隔离，不影响写作）"}
+    out = (r.stdout or "").strip().splitlines()
+    if not out:
+        return {"available": False, "level": 0, "muted": False, "error": "音量组件无输出"}
     try:
-        sess = _match_audio_session(app_id)
-        if sess is None:
-            return {"available": False, "level": 0, "muted": False, "error": "未找到对应音频会话（可能未播放或本机不支持）"}
-        v = sess.SimpleAudioVolume
-        level = v.GetMasterVolume()
-        muted = bool(v.GetMute())
-        return {"available": True, "level": int(round(max(0.0, min(1.0, level)) * 100)), "muted": muted}
-    except Exception as e:
-        return {"available": False, "level": 0, "muted": False, "error": "音量读取失败：%s" % e}
+        return _json.loads(out[-1])
+    except Exception:
+        return {"available": False, "level": 0, "muted": False, "error": "音量组件返回无法解析"}
 
 
-def set_volume(app_id: str, level: int):
+def get_volume(app_id=""):
+    """读取当前播放 App 的音量。返回 {available, level(0-100), muted, installing?, error}。"""
+    try:
+        import pycaw  # 主进程仅做可用性检查（不创建 COM 对象，安全）
+    except Exception:
+        return _pycaw_unavailable()
+    return _run_volume_worker("get", app_id)
+
+
+def set_volume(app_id, level):
     """设置当前播放 App 的音量（0-100）。返回新的音量状态。"""
     try:
-        from pycaw.pycaw import AudioUtilities  # noqa: F401
-    except Exception as e:
-        return {"available": False, "level": 0, "muted": False, "error": "pycaw 不可用：%s" % e}
-    try:
-        sess = _match_audio_session(app_id)
-        if sess is None:
-            return {"available": False, "level": 0, "muted": False, "error": "未找到对应音频会话"}
-        v = sess.SimpleAudioVolume
-        lvl = max(0.0, min(1.0, float(level) / 100.0))
-        v.SetMasterVolume(lvl, None)
-        return {"available": True, "level": int(round(lvl * 100)), "muted": bool(v.GetMute())}
-    except Exception as e:
-        return {"available": False, "level": 0, "muted": False, "error": "音量设置失败：%s" % e}
+        import pycaw
+    except Exception:
+        return _pycaw_unavailable()
+    return _run_volume_worker("set", app_id, level)

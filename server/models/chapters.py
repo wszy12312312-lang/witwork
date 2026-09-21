@@ -1,7 +1,7 @@
 """chapters 数据访问（无业务逻辑）。"""
 from server.db import get_conn
 
-_ALLOWED = {"title", "content", "volume_id", "status", "sort_order"}
+_ALLOWED = {"title", "content", "volume_id", "status", "sort_order", "outline"}
 
 
 def count_words(text):
@@ -51,14 +51,14 @@ def get_chapter(chapter_id, conn=None):
             conn.close()
 
 
-def create_chapter(book_id, title="未命名章节", volume_id=None, content="", sort_order=0, conn=None):
+def create_chapter(book_id, title="未命名章节", volume_id=None, content="", sort_order=0, outline="", conn=None):
     own = conn is None
     conn = conn or get_conn()
     try:
         words = count_words(content)
         cur = conn.execute(
-            "INSERT INTO chapters(book_id, volume_id, title, content, words, sort_order) VALUES (?,?,?,?,?,?)",
-            (book_id, volume_id, title, content, words, sort_order),
+            "INSERT INTO chapters(book_id, volume_id, title, content, words, sort_order, outline) VALUES (?,?,?,?,?,?,?)",
+            (book_id, volume_id, title, content, words, sort_order, outline),
         )
         conn.commit()
         return get_chapter(cur.lastrowid, conn)

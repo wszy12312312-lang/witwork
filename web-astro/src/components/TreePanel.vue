@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive, ref, computed } from 'vue';
+import { api } from '../lib/api';
 import {
   store,
   openBook,
@@ -65,6 +66,81 @@ const hudOn = computed(() => store.hudEnabled);
 async function closeHud() {
   await saveSettings({ hud_enabled: false });
 }
+
+// 作品行点击：已展开则收起，否则展开（不再只能展开）
+function toggleBook(b: { id: number }) {
+  if (store.currentBookId === b.id) {
+    store.currentBookId = null;
+  } else {
+    openBook(b.id);
+  }
+}
+
+// ---- 拖动排序（卷与章节） ----
+// HTML5 原生拖拽：卷在卷列表内排序；章在同卷（或根级）内排序。
+// 排完把新 sort_order 逐个 PUT 落库，再 openBook 刷新（后端按 sort_order,id 排序返回）。
+const dragInfo = ref<{ kind: 'vol' | 'ch'; id: number; volumeId: number | null } | null>(null);
+const dropKey = ref('');
+function onDragStart(e: DragEvent, kind: 'vol' | 'ch', id: number, volumeId: number | null) {
+  dragInfo.value = { kind, id, volumeId };
+  dropKey.value = '';
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(id));
+  }
+}
+function onDragOver(e: DragEvent, kind: 'vol' | 'ch', id: number) {
+  if (!dragInfo.value || dragInfo.value.kind !== kind) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+  dropKey.value = kind + ':' + id;
+}
+function onDragLeave(kind: 'vol' | 'ch', id: number) {
+  if (dropKey.value === kind + ':' + id) dropKey.value = '';
+}
+function onDragEnd() {
+  dragInfo.value = null;
+  dropKey.value = '';
+}
+async function onDrop(e: DragEvent, kind: 'vol' | 'ch', volumeId: number | null, targetId: number) {
+  e.preventDefault();
+  e.stopPropagation();
+  const info = dragInfo.value;
+  onDragEnd();
+  if (!info || info.kind !== kind || info.id === targetId) return;
+  const book = store.currentBook;
+  if (!book) return;
+  if (kind === 'vol') {
+    const list = [...book.volumes];
+    const from = list.findIndex((v) => v.id === info.id);
+    const to = list.findIndex((v) => v.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    book.volumes = list;
+    await Promise.all(list.map((v, i) => api.updateVolume(v.id, { sort_order: i })));
+  } else {
+    if ((info.volumeId || null) !== (volumeId || null)) return; // 只允许同层排序
+    const list = book.chapters.filter((c) => (c.volume_id || null) === (volumeId || null));
+    const from = list.findIndex((c) => c.id === info.id);
+    const to = list.findIndex((c) => c.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    // 本地先生效（编辑器里当前打开的章不受影响）
+    const byId = new Map(book.chapters.map((c) => [c.id, c]));
+    list.forEach((c, i) => {
+      const t = byId.get(c.id);
+      if (t) t.sort_order = i;
+    });
+    await Promise.all(list.map((c, i) => api.updateChapter(c.id, { sort_order: i })));
+  }
+  await openBook(book.id);
+}
+const dragClass = (kind: 'vol' | 'ch', id: number) => ({
+  dragging: dragInfo.value?.kind === kind && dragInfo.value.id === id,
+  over: dropKey.value === kind + ':' + id,
+});
 </script>
 
 <template>
@@ -119,15 +195,29 @@ async function closeHud() {
       </div>
       <ul class="list book-list">
         <li v-for="b in store.books" :key="b.id" class="book-item">
-          <div class="book-row" :class="{ active: b.id === store.currentBookId }" @click="openBook(b.id)">
-            <span class="caret">▸</span>
+          <div class="book-row" :class="{ active: b.id === store.currentBookId }" @click="toggleBook(b)">
+            <span class="caret" :class="{ open: b.id === store.currentBookId }">▸</span>
             <span class="name">{{ b.title || '未命名' }}</span>
             <RareDeleteButton title="删除作品（进回收站）" @confirm="doTrash(b.id)" />
           </div>
 
           <div v-if="b.id === store.currentBookId && store.currentBook" class="book-children">
-            <div class="vol" v-for="v in store.currentBook.volumes" :key="v.id">
-              <div class="vol-row">
+            <div
+              class="vol"
+              v-for="v in store.currentBook.volumes"
+              :key="v.id"
+            >
+              <div
+                class="vol-row"
+                draggable="true"
+                :class="dragClass('vol', v.id)"
+                title="拖动可调整卷的顺序"
+                @dragstart="onDragStart($event, 'vol', v.id, null)"
+                @dragover="onDragOver($event, 'vol', v.id)"
+                @dragleave="onDragLeave('vol', v.id)"
+                @drop="onDrop($event, 'vol', null, v.id)"
+                @dragend="onDragEnd"
+              >
                 <span class="caret">▾</span>
                 <span class="name">📖 {{ v.title }}</span>
                 <button class="mini" @click="openNewChapter(v.id)">＋章</button>
@@ -137,8 +227,15 @@ async function closeHud() {
                 class="ch"
                 v-for="ch in chaptersOf(v.id)"
                 :key="ch.id"
-                :class="{ active: ch.id === store.currentChapterId }"
+                :class="{ active: ch.id === store.currentChapterId, ...dragClass('ch', ch.id) }"
+                draggable="true"
+                title="拖动可调整章节顺序"
                 @click="openChapter(ch.id)"
+                @dragstart="onDragStart($event, 'ch', ch.id, v.id)"
+                @dragover="onDragOver($event, 'ch', ch.id)"
+                @dragleave="onDragLeave('ch', ch.id)"
+                @drop="onDrop($event, 'ch', v.id, ch.id)"
+                @dragend="onDragEnd"
               >
                 <span class="dot">·</span>
                 <span class="ch-title">{{ ch.title }}</span>
@@ -159,12 +256,20 @@ async function closeHud() {
               <button class="mini add-vol" v-if="!ui.newVol[v.id]" @click="ui.newVol[v.id] = true">＋卷</button>
             </div>
 
+            <!-- 根级（不属于任何卷）章节：同样可拖动排序 -->
             <div
               class="ch"
               v-for="ch in chaptersOf(null)"
               :key="ch.id"
-              :class="{ active: ch.id === store.currentChapterId }"
+              :class="{ active: ch.id === store.currentChapterId, ...dragClass('ch', ch.id) }"
+              draggable="true"
+              title="拖动可调整章节顺序"
               @click="openChapter(ch.id)"
+              @dragstart="onDragStart($event, 'ch', ch.id, null)"
+              @dragover="onDragOver($event, 'ch', ch.id)"
+              @dragleave="onDragLeave('ch', ch.id)"
+              @drop="onDrop($event, 'ch', null, ch.id)"
+              @dragend="onDragEnd"
             >
               <span class="dot">·</span>
               <span class="ch-title">{{ ch.title }}</span>
@@ -173,6 +278,9 @@ async function closeHud() {
                 <RareDeleteButton size="sm" title="删除本章" @confirm="doDelChapter(ch)" />
               </span>
             </div>
+
+            <!-- 常驻新增：即使卷/章删光了也能一键补章（补在根级，可再拖进卷） -->
+            <button class="mini add-ch" @click="openNewChapter(null)">＋ 新增章节</button>
           </div>
         </li>
         <li v-if="!store.books.length" class="empty mono">暂无作品</li>
@@ -251,6 +359,10 @@ async function closeHud() {
 .caret {
   color: var(--theme-muted);
   font-size: 11px;
+  transition: transform 0.18s var(--motion);
+}
+.caret.open {
+  transform: rotate(90deg);
 }
 .name {
   font-size: 14px;
@@ -359,6 +471,30 @@ async function closeHud() {
 }
 .add-vol {
   margin: 2px 0 4px 22px;
+}
+/* 常驻新增章节按钮：虚线边框引导，与「新建作品」同视觉语言 */
+.add-ch {
+  margin: 6px 0 4px 22px;
+  border-style: dashed;
+  color: var(--theme-muted);
+}
+.add-ch:hover {
+  color: var(--theme-accent-hover);
+}
+/* 拖动排序视觉反馈：拖起半透明、落点高亮 */
+.vol-row {
+  cursor: grab;
+}
+.vol-row:active {
+  cursor: grabbing;
+}
+.dragging {
+  opacity: 0.4;
+}
+.over {
+  outline: 1px dashed var(--theme-accent);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--theme-accent) 10%, transparent);
 }
 .trash-sec {
   font-size: 10.5px;

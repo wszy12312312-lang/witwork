@@ -50,7 +50,22 @@ def song_cover():
     data = smtc.get_cover_bytes()
     if not data:
         return Response(status_code=204)
-    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+    return Response(content=data, media_type=_sniff_image_mime(data), headers={"Cache-Control": "no-store"})
+
+
+def _sniff_image_mime(data: bytes) -> str:
+    """SMTC 缩略图可能是 PNG/JPEG/WebP 等，按魔数判定，避免 Content-Type 造假导致浏览器拒渲染。"""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:3] == b"\x42\x4d\x00":  # BMP（Windows 常见）
+        return "image/bmp"
+    return "application/octet-stream"
 
 
 class VolumeSet(BaseModel):

@@ -305,11 +305,11 @@ if (!gotLock) {
         icon: target,
         iconIndex: 0,
       };
-      let ok = false;
+      let ok = false; let err = '';
       try {
         ok = shell.writeShortcutLink(mk, 'create', opts);
       } catch (e) {
-        console.error('SHORTCUT_FAIL ' + String(e));
+        err = String(e); console.error('SHORTCUT_FAIL ' + err);
       }
       console.log('SHORTCUT ' + (ok ? 'OK' : 'FAIL') + ' ' + mk + ' -> ' + target);
       app.quit();

@@ -149,7 +149,11 @@ onBeforeUnmount(() => {
       '--editor-font-size': store.editorFontSize + 'px',
       '--editor-line-height': String(store.editorLineHeight),
       '--editor-page-width': store.editorPageWidth + 'px',
+      // 统一不透明度：一个滑块同时驱动顶栏、面板、内嵌区、抽屉（设置 topbar_alpha）
       '--topbar-alpha': store.topbarAlpha + '%',
+      '--panel-alpha': store.topbarAlpha + '%',
+      '--field-alpha': store.topbarAlpha + '%',
+      '--drawer-alpha': store.topbarAlpha + '%',
     }"
   >
     <header class="topbar">

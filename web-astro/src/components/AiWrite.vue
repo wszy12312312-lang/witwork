@@ -9,14 +9,17 @@ const props = defineProps<{
   selStart: number;
   selEnd: number;
   chapterTitle: string;
+  initialOp?: 'rewrite' | 'continue' | 'expand' | 'shrink' | 'create' | 'review' | 'gen_outline' | 'gen_from_outline' | null;
+  outlineText?: string;
 }>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'apply-text', payload: { mode: 'replace' | 'insert' | 'whole'; text: string; selStart?: number; selEnd?: number; pos?: number }): void;
+  (e: 'apply-outline', payload: { text: string }): void;
 }>();
 
-type Op = 'rewrite' | 'continue' | 'expand' | 'shrink' | 'create' | 'review';
+type Op = 'rewrite' | 'continue' | 'expand' | 'shrink' | 'create' | 'review' | 'gen_outline' | 'gen_from_outline';
 
 const OPS: { key: Op; label: string; need: 'sel' | 'none' | 'book'; desc: string }[] = [
   { key: 'rewrite', label: '改写', need: 'sel', desc: '按方向改写选中文字（无选区则改整章）' },
@@ -25,9 +28,11 @@ const OPS: { key: Op; label: string; need: 'sel' | 'none' | 'book'; desc: string
   { key: 'shrink', label: '缩写', need: 'sel', desc: '压缩冗余、保留核心（无选区则缩整章）' },
   { key: 'create', label: '创作', need: 'book', desc: '按方向写全新段落，参考全书风格' },
   { key: 'review', label: '通读全书', need: 'book', desc: '读完整部作品，给出修改意见' },
+  { key: 'gen_outline', label: '想法转大纲', need: 'none', desc: '把你的想法变成一章可写的大纲' },
+  { key: 'gen_from_outline', label: '按大纲写', need: 'none', desc: '按本章大纲生成完整正文（替换整章）' },
 ];
 
-const op = ref<Op>('rewrite');
+const op = ref<Op>(props.initialOp || 'rewrite');
 const instruction = ref('');
 const result = ref('');
 const done = ref(false);
@@ -38,6 +43,8 @@ const selLen = computed(() => (hasSel.value ? props.selEnd - props.selStart : 0)
 
 const curOp = computed(() => OPS.find((o) => o.key === op.value)!);
 const applyLabel = computed(() => {
+  if (op.value === 'gen_outline') return '写入大纲';
+  if (op.value === 'gen_from_outline') return '替换整章';
   if (op.value === 'review') return '';
   if (op.value === 'continue') return '插入到此处';
   if (op.value === 'create') return '插入到光标';
@@ -63,6 +70,10 @@ async function run() {
   let scope = 'chapter';
   if (o === 'review' || o === 'create') {
     scope = 'book';
+  } else if (o === 'gen_from_outline') {
+    text = props.outlineText || '';
+  } else if (o === 'gen_outline') {
+    text = ''; // 想法写在 instruction
   } else if (hasSel.value) {
     text = props.fullText.slice(props.selStart, props.selEnd);
   } else {
@@ -91,6 +102,14 @@ function apply() {
   const text = stripFences(result.value);
   if (!text.trim()) return;
   if (op.value === 'review') return;
+  if (op.value === 'gen_outline') {
+    emit('apply-outline', { text });
+    return;
+  }
+  if (op.value === 'gen_from_outline') {
+    emit('apply-text', { mode: 'whole', text });
+    return;
+  }
   if (op.value === 'continue') {
     const pos = hasSel.value ? props.selEnd : props.fullText.length;
     emit('apply-text', { mode: 'insert', text, pos });
@@ -153,7 +172,9 @@ watch(
     </div>
 
     <div class="aw-sel mono">
-      <template v-if="op === 'review' || op === 'create'">将读取全书正文作为上下文</template>
+      <template v-if="op === 'gen_outline'">在下方填写你的想法，AI 据此生成本章大纲</template>
+      <template v-else-if="op === 'gen_from_outline'">将按下方「本章大纲」生成完整正文（替换整章）</template>
+      <template v-else-if="op === 'review' || op === 'create'">将读取全书正文作为上下文</template>
       <template v-else-if="hasSel">已选 {{ selLen }} 字（{{ op === 'continue' ? '续写于选区之后' : '将作用于选区' }}）</template>
       <template v-else>未选区 · 将作用于整章</template>
     </div>

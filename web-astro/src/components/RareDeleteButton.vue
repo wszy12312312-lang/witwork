@@ -174,19 +174,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 .rd-act.no {
   background: var(--theme-error);
 }
-/* 紧凑变体（目录树的章节 / 卷行）：按钮更小，确认气泡更贴身 */
+/* 紧凑变体（目录树的章节 / 卷行）：图标与 md 变体保持同一视觉大小（16px 内占比一致），
+ * 按钮壳 24px：图标不再显得过小，同时不撑破树行 */
 .rd.sm .rd-main {
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
 }
 .rd.sm .rd-main svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 .rd.sm .rd-check {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 .rd.sm .rd-panel {
   right: calc(100% + 4px);

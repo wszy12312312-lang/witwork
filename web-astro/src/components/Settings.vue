@@ -41,6 +41,7 @@ const form = reactive({
   hud_texture: true,
   hud_widgets: 'time,today,countdown,song,focus',
   song_autodetect: true,
+  editor_ruled_lines: false,
 });
 
 // 功能面板部件开关
@@ -83,14 +84,15 @@ function syncFormFromStore() {
   form.hud_texture = Boolean(c['hud_texture'] ?? true);
   form.hud_widgets = (c['hud_widgets'] as string) || 'time,today,countdown,song,focus';
   form.song_autodetect = c['song_autodetect'] === undefined ? true : Boolean(c['song_autodetect']);
+  form.editor_ruled_lines = Boolean(c['editor_ruled_lines'] ?? false);
 }
 
 const saving = ref(false);
 const savedTip = ref('');
 
 // ---- 外观项的「即时生效」 ----
-// 顶栏（操作层）不透明度：拖动过程中直接改 store（本地即时生效，不发请求），
-// 松手 / 停止拖动后再落库。历史问题：以前必须点「保存偏好」才生效，用户以为改不动。
+// 界面统一不透明度：拖动过程中直接改 store（本地即时生效，不发请求），
+// 松手 / 停止拖动后再落库。App.vue 会把该值同时注入 --topbar/--panel/--field/--drawer-alpha。
 let alphaTimer: ReturnType<typeof setTimeout> | null = null;
 function clampAlpha(v: number) {
   const n = Number(v);
@@ -468,7 +470,7 @@ function useDiscoveredModel(m: string) {
               <input v-model.number="form.break_days_warn" type="number" min="1" max="30" />
             </label>
             <label class="fld wide">
-              <span>顶栏（操作层）不透明度 {{ form.topbar_alpha }}%（拖动即时生效，所有预设通用）</span>
+              <span>界面整体不透明度 {{ form.topbar_alpha }}%（顶栏与各面板统一生效，拖动即时预览）</span>
               <input
                 v-model.number="form.topbar_alpha"
                 type="range"
@@ -486,6 +488,10 @@ function useDiscoveredModel(m: string) {
             <label class="fld check">
               <input v-model="form.punctuation_normalize" type="checkbox" />
               <span>标点归一化</span>
+            </label>
+            <label class="fld check">
+              <input v-model="form.editor_ruled_lines" type="checkbox" />
+              <span>写作区信纸横线</span>
             </label>
           </div>
           <div class="sub">功能面板</div>

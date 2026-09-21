@@ -11,6 +11,7 @@ import {
   loadPreview,
   runTypeset,
   applyTypeset,
+  saveSettings,
 } from '../lib/store';
 import FindReplace from './FindReplace.vue';
 import PhonePreview from './PhonePreview.vue';
@@ -40,6 +41,10 @@ const showFind = ref(false);
 const viewMode = ref<'edit' | 'preview' | 'split'>('edit');
 const showPreview = computed(() => viewMode.value !== 'edit');
 const showEditor = computed(() => viewMode.value !== 'preview');
+async function toggleRuled() {
+  store.editorRuledLines = !store.editorRuledLines;
+  await saveSettings({ editor_ruled_lines: store.editorRuledLines });
+}
 const showSnapshots = ref(false);
 const showAi = ref(false);
 const showAiWrite = ref(false);
@@ -56,6 +61,11 @@ const showRoles = ref(false);
 const cursorIndex = ref(-1);
 const selStart = ref(0);
 const selEnd = ref(0);
+const aiPresetOp = ref<'rewrite' | 'continue' | 'expand' | 'shrink' | 'gen_outline' | 'gen_from_outline' | null>(null);
+const showOutline = ref(false);
+const outline = ref('');
+const menu = ref<{ show: boolean; x: number; y: number }>({ show: false, x: 0, y: 0 });
+let outlineTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(
   () => store.currentChapterId,
@@ -63,6 +73,7 @@ watch(
     if (id && store.currentChapter) {
       title.value = store.currentChapter.title || '';
       content.value = store.currentChapter.content || '';
+      outline.value = (store.currentChapter as any).outline || '';
       await loadHistoryStatus();
       if (showPreview.value) refreshPreview();
     }
@@ -94,6 +105,58 @@ function onCursor(e: Event) {
   store.editorCursor = start;
   selStart.value = start;
   selEnd.value = end;
+}
+
+function onContextMenu(e: MouseEvent) {
+  const ta = e.target as HTMLTextAreaElement;
+  if (ta && typeof ta.selectionStart === 'number') {
+    selStart.value = ta.selectionStart;
+    selEnd.value = ta.selectionEnd ?? ta.selectionStart;
+  }
+  menu.value = { show: true, x: e.clientX, y: e.clientY };
+}
+
+function closeMenu() {
+  if (menu.value.show) menu.value.show = false;
+}
+
+function openAiOp(o: 'rewrite' | 'continue' | 'expand' | 'shrink') {
+  aiPresetOp.value = o;
+  menu.value.show = false;
+  showAiWrite.value = true;
+}
+
+function closeAiWrite() {
+  showAiWrite.value = false;
+  aiPresetOp.value = null;
+}
+
+function genOutline() {
+  aiPresetOp.value = 'gen_outline';
+  showAiWrite.value = true;
+}
+
+function genFromOutline() {
+  if (!outline.value.trim()) return;
+  aiPresetOp.value = 'gen_from_outline';
+  showAiWrite.value = true;
+}
+
+async function saveOutline() {
+  if (!store.currentChapterId) return;
+  await saveChapter({ title: title.value, content: content.value, outline: outline.value });
+}
+
+function onOutlineInput() {
+  if (outlineTimer) clearTimeout(outlineTimer);
+  outlineTimer = setTimeout(() => saveOutline(), 1500);
+}
+
+async function applyOutline(payload: { text: string }) {
+  outline.value = payload.text;
+  showOutline.value = true;
+  await saveOutline();
+  closeAiWrite();
 }
 
 async function applyAiText(payload: {
@@ -217,7 +280,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 </script>
 
 <template>
-  <main class="panel editor">
+  <main class="panel editor" @click="closeMenu">
     <div v-if="!store.currentChapter" class="empty">从左侧选择或新建一个章节开始写作</div>
     <template v-else>
       <div class="editor-bar" v-magnet-rail="{ selector: 'button', strength: 6, scale: 1.08 }">
@@ -238,6 +301,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         <button class="tb" :class="{ on: showStats }" @click="showStats = !showStats">统计</button>
         <button class="tb" :class="{ on: showTools }" @click="showTools = !showTools">工具</button>
         <button class="tb" :class="{ on: showRoles }" @click="showRoles = !showRoles">角色库</button>
+        <button class="tb" :class="{ on: showOutline }" @click="showOutline = !showOutline">大纲</button>
         <span class="kb-sub mono">栈 {{ store.historyStatus.depth }}（可撤 {{ store.historyStatus.undo_left }}）</span>
       </div>
 
@@ -258,8 +322,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         </div>
       </div>
 
-      <div class="editor-main" :class="'vm-' + viewMode">
+      <div class="editor-main" :class="['vm-' + viewMode, { ruled: store.editorRuledLines }]">
         <div v-show="showEditor" class="editor-left">
+          <div v-if="showOutline" class="outline-box">
+            <div class="ob-head">
+              <span class="ob-title">本章大纲</span>
+              <div class="ob-acts">
+                <button class="ob-btn" @click="genOutline">想法转大纲</button>
+                <button class="ob-btn primary" :disabled="!outline.trim()" @click="genFromOutline">按大纲生成正文</button>
+                <button class="ob-x" @click="showOutline = false" title="收起">✕</button>
+              </div>
+            </div>
+            <textarea class="ob-ta" v-model="outline" @input="onOutlineInput" placeholder="写本节大纲，或点「想法转大纲」让 AI 生成…"></textarea>
+          </div>
           <input class="chap-title" v-model="title" @input="onInput" placeholder="章节标题" />
           <textarea
             class="chap-body"
@@ -268,7 +343,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             @keyup="onCursor"
             @click="onCursor"
             @select="onCursor"
-            placeholder="开始写作…"
+            @contextmenu.prevent="onContextMenu"
+            placeholder="开始写作…（右键可选「扩写/缩写/修改/续写」）"
           ></textarea>
         </div>
         <div v-if="showPreview && store.preview" class="editor-right">
@@ -285,6 +361,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
           <button class="vs" :class="{ on: viewMode === 'edit' }" @click="setView('edit')" title="仅编辑">编辑</button>
           <button class="vs" :class="{ on: viewMode === 'preview' }" @click="setView('preview')" title="仅预览">预览</button>
           <button class="vs" :class="{ on: viewMode === 'split' }" @click="setView('split')" title="编辑与预览同时显示">分屏</button>
+        <button class="vs ruled-toggle" :class="{ on: store.editorRuledLines }" @click="toggleRuled" title="写作区信纸横线">横线</button>
         </div>
       </div>
 
@@ -295,6 +372,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
         <span class="hint">自动保存 1.5s · Ctrl+S 保存 · Ctrl+F 查找</span>
       </div>
     </template>
+
+    <!-- 写作区右键菜单：扩写 / 缩写 / 修改 / 续写 -->
+    <div v-if="menu.show" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
+      <button class="ctx-item" @click="openAiOp('expand')">扩写</button>
+      <button class="ctx-item" @click="openAiOp('shrink')">缩写</button>
+      <button class="ctx-item" @click="openAiOp('rewrite')">修改</button>
+      <button class="ctx-item" @click="openAiOp('continue')">续写</button>
+    </div>
 
     <!-- 章节快照抽屉 -->
     <transition name="drawer">
@@ -325,8 +410,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             :sel-start="selStart"
             :sel-end="selEnd"
             :chapter-title="title"
-            @close="showAiWrite = false"
+            :initial-op="aiPresetOp"
+            :outline-text="outline"
+            @close="closeAiWrite"
             @apply-text="applyAiText"
+            @apply-outline="applyOutline"
           />
         </aside>
       </div>
@@ -841,6 +929,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   outline: none;
   border-color: var(--theme-accent);
 }
+/* 信纸横线：随文本滚动对齐行高（周期 = 字号 × 行高） */
+.editor-main.ruled .chap-body {
+  background-attachment: local;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--editor-font-size) * var(--editor-line-height) - 1px),
+    rgba(140, 150, 170, 0.22) calc(var(--editor-font-size) * var(--editor-line-height) - 1px),
+    rgba(140, 150, 170, 0.22) calc(var(--editor-font-size) * var(--editor-line-height))
+  );
+}
 .editor-right {
   border: 1px solid var(--theme-line);
   border-radius: var(--radius-sm);
@@ -892,5 +991,112 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   .editor-right {
     height: 320px;
   }
+}
+
+/* 写作区右键菜单 */
+.ctx-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 132px;
+  background: var(--theme-paper);
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(8, 10, 8, 0.28);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ctx-item {
+  text-align: left;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--theme-ink-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ctx-item:hover {
+  background: var(--theme-field);
+  color: var(--theme-accent-hover);
+}
+/* 本章大纲编辑框 */
+.outline-box {
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--theme-field) var(--field-alpha), transparent);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ob-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ob-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--theme-ink);
+}
+.ob-acts {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ob-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--theme-ink-soft);
+  cursor: pointer;
+}
+.ob-btn:hover:not(:disabled) {
+  border-color: var(--theme-accent);
+  color: var(--theme-accent-hover);
+}
+.ob-btn.primary {
+  background: var(--theme-solid-bg);
+  color: var(--theme-solid-fg);
+  border-color: var(--theme-solid-bg);
+}
+.ob-btn.primary:hover:not(:disabled) {
+  background: var(--theme-solid-hover);
+}
+.ob-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ob-x {
+  border: none;
+  background: transparent;
+  color: var(--theme-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ob-x:hover {
+  color: var(--theme-ink);
+}
+.ob-ta {
+  resize: vertical;
+  min-height: 84px;
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 8px 10px;
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: var(--theme-field);
+  color: var(--theme-ink);
+}
+.ob-ta:focus {
+  outline: none;
+  border-color: var(--theme-accent);
 }
 </style>
