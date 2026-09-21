@@ -1,0 +1,267 @@
+/* 万维文 WitWork —— 设计令牌
+ * 暖色暗调调色板 + 暖杏金 accent + MiSans 字体驱动。本地优先，无 CDN。
+ *
+ * ⚠️ 这段头注释必须一次写完，不要在前面的行里提前写出注释的收尾符号（星号加斜杠）。
+ * 历史事故：收尾符号被写在了第二行，于是紧随其后的 :root 规则的选择器被污染成
+ * 非法值，浏览器把整条规则丢掉 —— 只写在 :root 里的令牌会全部失效：面板变全透明、
+ * 界面不放大 1.2 倍、圆角变直角、过渡消失、字体退回系统默认。
+ * 现在 web-astro/deploy_astro.py 有 CSS 注释体检，专门拦这类问题；改完必须跑部署。
+ */
+
+:root {
+  /* 纸面 / 墨色（默认＝暗色，避免首屏闪白；App.vue 挂载后写入 data-theme） */
+  --theme-paper: #14130f;
+  --theme-paper-rgb: 20, 19, 15;
+  --theme-paper-raised: #1d1b16;
+  --theme-ink: #ece7d9;
+  --theme-ink-soft: #cbc3b0;
+  --theme-ink-mute: #a49b86;
+
+  /* 暖杏金 accent */
+  --theme-accent: #c9a468;
+  --theme-accent-selection: #4e402a;
+  --theme-accent-hover: #dcb87e;
+  --theme-accent-strong: #b8935c;
+
+  /* 线条 / 中性 */
+  --theme-line: #38332a;
+  --theme-line-2: #423d31;
+  --theme-line-3: #2a261f;
+  --theme-muted: #8b8271;
+  --theme-panel: #191712;
+  --theme-field: #211e18;
+
+  /* 控件 */
+  --theme-toggle-on: #8fa06a;
+  --theme-solid-bg: #d6c6a4;
+  --theme-solid-fg: #17150f;
+  --theme-solid-hover: #e3d6b8;
+  --theme-error: #e08a70;
+  --theme-success: #9fc98a;
+
+  /* 遮罩（抽屉 / 弹层 / 侧栏浮层）。
+   * 必须与「墨色」解耦：暗色下 --theme-ink 是浅色，若继续用
+   * color-mix(in srgb, var(--theme-ink) …) 做遮罩，会得到一层「亮雾」。 */
+  --theme-scrim: rgba(4, 4, 3, 0.66);
+
+  /* 字体 */
+  --font-sans: "MiSans", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Maple Mono", ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* 形状 / 动效 */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow-panel: 0 26px 95px rgba(0, 0, 0, 0.55);
+  --motion: cubic-bezier(0.22, 1, 0.36, 1); /* 临界阻尼慢动效 */
+
+  /* 纯色模式（用户要求：不用磨砂/半透明，改用纯色）。
+   * 100% 即完全不透明；若日后想恢复玻璃质感，把数值调回（如 62%）并加回 backdrop-filter 即可。 */
+  --panel-alpha: 100%;  /* 外层面板（目录树/编辑器/AI 侧栏） */
+  --field-alpha: 100%;  /* 正文区与标题输入等内嵌区域 */
+  --drawer-alpha: 100%; /* 右侧抽屉 */
+
+  /* 最表层操作层（顶栏）不透明度：由设置项 topbar_alpha 驱动（App.vue 注入）。
+   * 所有预设通用，可变透明度；100% 即完全不透明。 */
+  --topbar-alpha: 78%;
+
+  /* 整体 UI 缩放（用户要求放大 1.2 倍）。
+   * 实现：.shell 用 transform: scale()，同时把 width/height 反向除以该值，
+   * 这样放大后仍精确铺满视口，不会出现空白边。改这个值即可整体调大小。 */
+  --ui-scale: 1.2;
+}
+
+/* 主题变体：dark / light / sepia 各自声明**完整**调色板。
+ * data-theme 由 App.vue 依据 config.theme 绑定到 <html>（也镜像到 .shell），设置页可实时切换。
+ * 注意：每套主题必须把所有调色板令牌都覆盖一遍，否则会漏出上一套的取值。 */
+[data-theme="dark"] {
+  --theme-paper: #14130f;
+  --theme-paper-rgb: 20, 19, 15;
+  --theme-paper-raised: #1d1b16;
+  --theme-ink: #ece7d9;
+  --theme-ink-soft: #cbc3b0;
+  --theme-ink-mute: #a49b86;
+  --theme-accent: #c9a468;
+  --theme-accent-selection: #4e402a;
+  --theme-accent-hover: #dcb87e;
+  --theme-accent-strong: #b8935c;
+  --theme-line: #38332a;
+  --theme-line-2: #423d31;
+  --theme-line-3: #2a261f;
+  --theme-muted: #8b8271;
+  --theme-panel: #191712;
+  --theme-field: #211e18;
+  --theme-toggle-on: #8fa06a;
+  --theme-solid-bg: #d6c6a4;
+  --theme-solid-fg: #17150f;
+  --theme-solid-hover: #e3d6b8;
+  --theme-error: #e08a70;
+  --theme-success: #9fc98a;
+  --theme-scrim: rgba(4, 4, 3, 0.66);
+  --shadow-panel: 0 26px 95px rgba(0, 0, 0, 0.55);
+}
+[data-theme="light"] {
+  --theme-paper: #f7f5f2;
+  --theme-paper-rgb: 247, 245, 242;
+  --theme-paper-raised: #ffffff;
+  --theme-ink: #1b1d17;
+  --theme-ink-soft: #34362d;
+  --theme-ink-mute: #4a4c40;
+  --theme-accent: #9a723d;
+  --theme-accent-selection: #cbb397;
+  --theme-accent-hover: #855f30;
+  --theme-accent-strong: #8a6a3c;
+  --theme-line: #d9d4c9;
+  --theme-line-2: #cfc9bd;
+  --theme-line-3: #e3ded4;
+  --theme-muted: #82807a;
+  --theme-panel: #f3f1ee;
+  --theme-field: #efece5;
+  --theme-toggle-on: #565c46;
+  --theme-solid-bg: #2f3128;
+  --theme-solid-fg: #f6f4ef;
+  --theme-solid-hover: #45473a;
+  --theme-error: #c9543f;
+  --theme-success: #5f9a4c;
+  --theme-scrim: rgba(8, 10, 8, 0.35);
+  --shadow-panel: 0 26px 95px rgba(8, 10, 8, 0.18);
+}
+[data-theme="sepia"] {
+  --theme-paper: #efe6d3;
+  --theme-paper-rgb: 239, 230, 211;
+  --theme-paper-raised: #f6efe0;
+  --theme-ink: #3a2c18;
+  --theme-ink-soft: #56412a;
+  --theme-ink-mute: #6b543a;
+  --theme-accent: #9c6b3f;
+  --theme-accent-selection: #d9b98a;
+  --theme-accent-hover: #7f5530;
+  --theme-accent-strong: #8c6238;
+  --theme-line: #cdbd9c;
+  --theme-line-2: #c3b18e;
+  --theme-line-3: #dbccae;
+  --theme-muted: #8a795c;
+  --theme-panel: #ece2cd;
+  --theme-field: #e4d7bd;
+  --theme-toggle-on: #6b7a4a;
+  --theme-solid-bg: #5a4326;
+  --theme-solid-fg: #f6efe0;
+  --theme-solid-hover: #6f5434;
+  --theme-error: #b5563a;
+  --theme-success: #6f8a4e;
+  --theme-scrim: rgba(58, 44, 24, 0.38);
+  --shadow-panel: 0 26px 95px rgba(58, 44, 24, 0.22);
+}
+
+/* 三维档案终端舞台（BaseLayout.astro 提供，非 App 组件树内）
+ * 必须写在全局：App.vue 的 scoped 选择器带 data-v 属性，匹配不到 #stage，
+ * 之前因此完全没有定位样式、画布尺寸异常、图案跑到画面底部。 */
+#viewport,
+#stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+#stage {
+  display: grid;
+  place-items: center; /* 档案体落在整个画面的正中间 */
+}
+#stage canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 统一滚动条（全站）：细窄、暖色调，悬停加深；同时支持 Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--theme-line) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--theme-muted) 45%, transparent);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-accent);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--theme-paper);
+  color: var(--theme-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+  overflow: hidden; /* 全屏式工作台 */
+}
+
+:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 2px; }
+
+/* 选区：底色取本主题的 accent-selection，文字色跟随墨色（暗色下才不会「深底深字」看不清） */
+::selection { background: var(--theme-accent-selection); color: var(--theme-ink); }
+
+button { font-family: inherit; cursor: pointer; color: inherit; }
+/* 表单控件默认不继承字体（会用系统字体），导致下拉框/输入框与页面字体不一致 */
+input,
+select,
+textarea,
+option {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--theme-accent); }
+
+/* 实心按钮 */
+.solid-button {
+  background: var(--theme-solid-bg);
+  color: var(--theme-solid-fg);
+  border: 1px solid var(--theme-solid-bg);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.95rem;
+  font-size: 14px;
+  transition: background 0.25s var(--motion), border-color 0.25s var(--motion);
+}
+.solid-button:hover { background: var(--theme-solid-hover); }
+
+.ghost-button {
+  background: transparent;
+  color: var(--theme-ink);
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.85rem;
+  font-size: 13px;
+  transition: background 0.2s var(--motion), border-color 0.2s var(--motion), color 0.2s var(--motion);
+}
+.ghost-button:hover { background: var(--theme-field); color: var(--theme-accent-hover); border-color: var(--theme-accent); }
+
+.mono { font-family: var(--font-mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

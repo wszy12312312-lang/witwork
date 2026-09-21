@@ -1,0 +1,22 @@
+{
+  "name": "inkrealm-web-astro",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4321",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/vue": "^5.0.0",
+    "@kitlangton/rolling-number": "^0.4.1",
+    "astro": "^5.0.0",
+    "three": "^0.183.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.183.0"
+  }
+}

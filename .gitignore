@@ -1,0 +1,73 @@
+# ===== 依赖 =====
+node_modules/
+desktop/node_modules_trash/
+
+# ===== Python =====
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# ===== 构建产物（可由源码重建，见 README）=====
+web/
+web-astro/dist/
+web-astro/.vite/
+desktop/dist/
+
+# ===== 前端旧版本备份（部署时自动生成）=====
+web.bak*/
+
+# ===== 用户数据（首次运行自动播种，不入库）=====
+data/
+
+# ===== 日志 / 临时产出 =====
+*.log
+_*.png
+_archive_port_*/
+aiops_out.txt
+check_out.txt
+deploy_out.txt
+summary_out.txt
+typeset_out.txt
+ollama_models.txt
+build_err.txt
+build_py_stderr.txt
+build_run.txt
+
+# ===== 一次性开发脚本（非项目源码）=====
+e2e_aiops.py
+e2e_typeset.py
+api_full_check.py
+api_full_check_result.json
+print_summary.py
+run_build.py
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# ===== 嵌入式/第三方（未使用，且为嵌套 git 仓库）=====
+vendor/
+
+# ===== 桌面版构建/运行临时产物 =====
+desktop/*.txt
+desktop/_shot*.json
+desktop/_run*.txt
+desktop/_rhine_probe.txt
+desktop/install_out.txt
+desktop/pack_out*.txt
+desktop/pack_final.txt
+desktop/reinstall_out.txt
+desktop/inkrealm_ui_topbar.png
+desktop/app-config.json
+
+# ===== 前端构建临时产物 =====
+web-astro/.astro/
+web-astro/build_once.txt
+web-astro/build_out*.txt
+
+# ===== 其它临时/结果文件 =====
+e2e_typeset_result.json
+start.bat.utf8lf.bak

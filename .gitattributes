@@ -1,0 +1,19 @@
+# 统一换行符处理：文本文件按仓库 LF 归一，检出时按规则还原
+* text=auto
+
+# .bat 必须保持 CRLF（cmd.exe 按 GBK 解析，LF 会导致命令被撕碎）
+*.bat text eol=crlf
+
+# Shell 脚本保持 LF
+*.sh text eol=lf
+
+# 二进制资源
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.glb binary
+*.svg text

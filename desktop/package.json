@@ -1,0 +1,64 @@
+{
+  "name": "witwork-desktop",
+  "version": "0.1.0",
+  "description": "万维文 WitWork 桌面版（Electron 包装 FastAPI + Vue 前端）。万维文 AI 写作：汇万千思路，写一纸文章。",
+  "main": "electron-main.js",
+  "author": "WitWork",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.witwork.desktop",
+    "productName": "万维文 WitWork",
+    "copyright": "Copyright © 2026 WitWork",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "electron-main.js",
+      "preload.js",
+      "app-config.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../server",
+        "to": "inkrealm/server"
+      },
+      {
+        "from": "../web",
+        "to": "inkrealm/web"
+      },
+      {
+        "from": "../data",
+        "to": "inkrealm/data"
+      },
+      {
+        "from": "../venv",
+        "to": "inkrealm/venv"
+      },
+      {
+        "from": "../requirements.txt",
+        "to": "inkrealm/requirements.txt"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "万维文WitWork-${version}-setup.${ext}",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "万维文 WitWork"
+    }
+  }
+}

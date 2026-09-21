@@ -1,0 +1,36 @@
+{
+  "rules_version": 1,
+  "description": "排版规则单一真源。预览渲染（只读）与正文规范（可写回）共用本文件。",
+  "fullwidth_map": {
+    ",": "，",
+    ".": "。",
+    "?": "？",
+    "!": "！",
+    ";": "；",
+    ":": "：",
+    "(": "（",
+    ")": "）",
+    "<": "《",
+    ">": "》"
+  },
+  "quote_open": "“",
+  "quote_close": "”",
+  "quote_pairs": [["“", "”"], ["「", "」"], ["『", "』"]],
+  "ellipsis": "……",
+  "ellipsis_patterns": ["\\.\\.\\.", "。。。", "\\.\\。"],
+  "dash": "——",
+  "dash_patterns": ["--", "—"],
+  "repeat_converge": [
+    ["！！", "！"],
+    ["。。", "。"],
+    ["？？", "？"],
+    ["，，", "，"]
+  ],
+  "en_space": true,
+  "line_start_forbid": "，。！？；：、）】》」』”’%",
+  "line_end_forbid": "（【《「『“‘",
+  "indent_chars": 2,
+  "split_dialogue": true,
+  "collapse_blank_lines": true,
+  "chars_per_page": 350
+}
