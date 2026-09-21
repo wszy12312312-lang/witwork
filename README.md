@@ -88,8 +88,6 @@ ollama pull deepseek-r1:7b     # 偏推理
 
 然后在「AI 助手」里选中对应 Provider、点「测试」，通过即可开始写。
 
-> 想在网页里直接看到这份介绍的完整视觉版？打开仓库根目录的 **`index.html`**。
-
 ---
 
 ## 从源码构建（可选）
@@ -114,7 +112,6 @@ server/         FastAPI 后端 + SQLite（单一真源）+ 服务（SMTC、导�
 web-astro/      前端源码（Astro + Vue + Three.js），构建后由 FastAPI 托管
 desktop/        Electron 桌面包装（electron-main / preload / 打包配置）
 tools/          开发期脚本（冒烟测试、诊断、桌面快捷方式…）
-index.html      项目介绍页（独立单文件，双击即可打开）
 使用说明.md      完整使用手册（界面、AI 协作、一致性工具、导出、备份、排障）
 ```
 
@@ -124,8 +121,4 @@ index.html      项目介绍页（独立单文件，双击即可打开）
 
 ## 许可证
 
-本软件采用 **非商业许可证（NC License）**：
-**可以自用、可以修改、可以免费分发，但不得用于任何商业目的**
-（销售、SaaS、内嵌于商业产品、收费代写服务等均需事先书面授权）。
-
-详见 [LICENSE](./LICENSE)。商业使用请联系作者签署商业授权协议。
+详见 [LICENSE](./LICENSE)。
