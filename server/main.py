@@ -13,7 +13,7 @@ import server.db as dbm
 import server.adapters.providers as _providers_pkg  # 触发 provider 注册
 from server.api import (books, chapters, health, providers, sessions, kb, patches, personas,
                         framework, characters, foreshadow, entries, roles, search, beats, history,
-                        typeset, stats, export, tools, backup, settings, ai_ops, song)
+                        typeset, stats, export, tools, backup, settings, ai_ops, song, asr)
 from server.config import load_config
 from server.models import providers as prov_m
 from server.models import knowledge as km_m
@@ -93,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(backup.router, prefix="/api")
     app.include_router(settings.router, prefix="/api")
     app.include_router(song.router, prefix="/api")
+    app.include_router(asr.router, prefix="/api")
     # 前端静态资源（SPA）；html=True 时目录请求回退到 index.html
     # 用 SPAStaticFiles 注入缓存策略：HTML no-store，哈希资源 immutable（见类注释）
     app.mount("/", SPAStaticFiles(directory=str(WEB_DIR), html=True), name="web")

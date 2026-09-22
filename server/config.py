@@ -61,6 +61,7 @@ DEFAULTS = {
     "ai_timeout": 300,              # AI 单次请求超时（秒）：本地大模型首字慢，60s 会被中途掐断
     "ai_kb_grounding": True,        # AI 写作全部操作接知识库：检索设定注入 + 伏笔/人物卡
     "ai_kb_deep_analysis": False,   # 深度分析：检索条数翻倍（更慢但更全）
+    "asr_model": "small",           # 本地语音识别（faster-whisper）：tiny/base/small/medium
     "config_version": CONFIG_VERSION,
 }
 

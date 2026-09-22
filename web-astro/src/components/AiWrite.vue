@@ -119,6 +119,13 @@ function selectOp(o: Op) {
   op.value = o;
 }
 
+// ---- 生成动画流程：方向文字「飞入」思考等待，首字到达后输出区展开呈现 ----
+const flying = ref(false);
+const flyText = computed(() => {
+  const t = instruction.value.trim();
+  return t ? (t.length > 26 ? t.slice(0, 26) + '…' : t) : curOp.value.label;
+});
+
 async function run() {
   if (store.streaming) return;
   if (runDisabled.value) return;
@@ -129,6 +136,9 @@ async function run() {
   resultChars.value = 0;
   stage.value = 'prepare';
   startTicker();
+  // 输入区文字以动画飞向「思考等待中」面板（0.6s，与等待面板的浮现重叠、衔接自然）
+  flying.value = true;
+  window.setTimeout(() => (flying.value = false), 680);
 
   const o = op.value;
   let text = '';
@@ -220,6 +230,18 @@ async function copyRes() {
   } catch {
     /* ignore */
   }
+}
+
+/** 输出区关闭：停止生成（若在跑）并清空输出，恢复空状态。 */
+function clearResult() {
+  if (store.streaming) stopAiOperate();
+  result.value = '';
+  done.value = false;
+  kbRefs.value = 0;
+  finalElapsedMs.value = 0;
+  resultChars.value = 0;
+  stopTicker();
+  stage.value = 'idle';
 }
 
 // 【修复】抽屉已打开时再触发右键菜单，initialOp 会变化
@@ -324,6 +346,34 @@ watch(
       </select>
     </div>
 
+    <!-- 生成历史：全部功能共用一份，新→旧；操作 + 当时方向 + 内容，可载入后再编辑/再生成/再应用 -->
+    <div class="aw-hist">
+      <button class="aw-hist-toggle" @click="showHistory = !showHistory">
+        🕘 历史记录<span v-if="awHistory.length">（{{ awHistory.length }}）</span>
+        <span class="tri">{{ showHistory ? '▾' : '▸' }}</span>
+      </button>
+      <button v-if="showHistory && awHistory.length" class="aw-hist-clear" @click="clearAwHistory">清空</button>
+    </div>
+    <div v-if="showHistory" class="aw-hist-list">
+      <div
+        v-for="h in awHistory"
+        :key="h.id"
+        class="aw-hist-item"
+        title="点击载入：可改方向重新生成，或直接再次应用"
+        @click="loadEntry(h)"
+      >
+        <div class="aw-hist-meta">
+          <span class="aw-hist-op">{{ h.opLabel }}</span>
+          <span v-if="h.chapterTitle" class="aw-hist-chap">{{ h.chapterTitle }}</span>
+          <span v-if="h.instruction" class="aw-hist-dir">方向：{{ h.instruction }}</span>
+          <span class="aw-hist-time">{{ fmtTime(h.ts) }}</span>
+        </div>
+        <div class="aw-hist-snip">{{ h.result.slice(0, 80) }}{{ h.result.length > 80 ? '…' : '' }}</div>
+        <button class="aw-hist-del" title="删除这条" @click.stop="removeAwHistory(h.id)">✕</button>
+      </div>
+      <div v-if="!awHistory.length" class="aw-hist-empty">还没有历史。生成一次就会记在这里。</div>
+    </div>
+
     <div class="aw-ops">
       <button
         v-for="o in OPS"
@@ -351,10 +401,13 @@ watch(
           ref="dirTa"
           v-model="instruction"
           class="aw-ta"
+          :class="{ thinking: store.streaming && !result }"
           :placeholder="curOp.need === 'book' ? '你的创作方向（可选，如：写一段雨夜追杀，节奏紧张）' : '你的方向（可选，如：更口语化 / 加强紧张感 / 缩短一半）'"
           :disabled="store.streaming"
         ></textarea>
         <SpeechButton class="aw-mic" title="语音输入方向" @result="onDirSpeech" />
+        <!-- 生成瞬间：方向文字原位起飞，飞向下方的「思考等待中」面板 -->
+        <span v-if="flying" class="aw-fly" aria-hidden="true">{{ flyText }}</span>
       </div>
     </div>
 
@@ -386,62 +439,50 @@ watch(
       <span v-if="runHint && !store.streaming" class="run-hint">{{ runHint }}</span>
     </div>
 
-    <!-- 生成历史：操作 + 当时方向 + 内容，可载入后再编辑/再生成/再应用 -->
-    <div class="aw-hist">
-      <button class="aw-hist-toggle" @click="showHistory = !showHistory">
-        🕘 历史记录<span v-if="awHistory.length">（{{ awHistory.length }}）</span>
-        <span class="tri">{{ showHistory ? '▾' : '▸' }}</span>
-      </button>
-      <button v-if="showHistory && awHistory.length" class="aw-hist-clear" @click="clearAwHistory">清空</button>
-    </div>
-    <div v-if="showHistory" class="aw-hist-list">
-      <div
-        v-for="h in awHistory"
-        :key="h.id"
-        class="aw-hist-item"
-        title="点击载入：可改方向重新生成，或直接再次应用"
-        @click="loadEntry(h)"
-      >
-        <div class="aw-hist-meta">
-          <span class="aw-hist-op">{{ h.opLabel }}</span>
-          <span v-if="h.instruction" class="aw-hist-dir">方向：{{ h.instruction }}</span>
-          <span class="aw-hist-time">{{ fmtTime(h.ts) }}</span>
-        </div>
-        <div class="aw-hist-snip">{{ h.result.slice(0, 80) }}{{ h.result.length > 80 ? '…' : '' }}</div>
-        <button class="aw-hist-del" title="删除这条" @click.stop="removeAwHistory(h.id)">✕</button>
-      </div>
-      <div v-if="!awHistory.length" class="aw-hist-empty">还没有历史。生成一次就会记在这里。</div>
-    </div>
+    <!-- 生成历史已移至「模型」选择块下方（统一一份，新→旧） -->
 
     <!-- threeui 风格等待面板：只要还在生成就常驻，首字之后自动切换为「输出中」 -->
-    <div v-if="store.streaming" class="aw-wait">
-      <AiWaiting
-        :stage="stage"
-        :elapsed-ms="elapsedMs"
-        :has-text="!!result"
-        :op-label="curOp.label"
-        @stop="stopAiOperate"
-      />
-    </div>
+    <transition name="aw-fade">
+      <div v-if="store.streaming" class="aw-wait">
+        <AiWaiting
+          :stage="stage"
+          :elapsed-ms="elapsedMs"
+          :has-text="!!result"
+          :op-label="curOp.label"
+          @stop="stopAiOperate"
+        />
+      </div>
+    </transition>
 
     <div v-if="store.aiError" class="aw-err">
       <span>⚠ {{ store.aiError }}</span>
       <button class="retry" @click="run">重试</button>
     </div>
 
-    <div class="aw-result" v-if="result">
-      <pre class="aw-text" :class="{ typing: store.streaming }">{{ stripFences(result) }}</pre>
-      <div class="aw-meta mono" v-if="done && !store.streaming">
-        耗时 {{ (finalElapsedMs / 1000).toFixed(1) }}s · 约 {{ resultChars }} 字<template v-if="kbRefs > 0"> · 已接知识库 {{ kbRefs }} 条设定</template>
+    <!-- 输出区：首字到达时从等待状态平滑展开；右上角 ✕ 清空恢复空态 -->
+    <transition name="aw-rise">
+      <div class="aw-result" v-if="result">
+        <div class="aw-result-head">
+          <span class="aw-result-cap">输出</span>
+          <button
+            class="aw-result-close"
+            title="清空输出内容并恢复空状态"
+            @click="clearResult"
+          >✕ 清空</button>
+        </div>
+        <pre class="aw-text" :class="{ typing: store.streaming }">{{ stripFences(result) }}</pre>
+        <div class="aw-meta mono" v-if="done && !store.streaming">
+          耗时 {{ (finalElapsedMs / 1000).toFixed(1) }}s · 约 {{ resultChars }} 字<template v-if="kbRefs > 0"> · 已接知识库 {{ kbRefs }} 条设定</template>
+        </div>
+        <div class="aw-result-btns" v-if="done && !store.streaming && op !== 'review'">
+          <button class="apply" @click="apply">{{ applyLabel }}</button>
+          <button class="cp" @click="copyRes">复制</button>
+        </div>
+        <div class="aw-result-btns" v-else-if="done && !store.streaming && op === 'review'">
+          <button class="cp" @click="copyRes">复制全部意见</button>
+        </div>
       </div>
-      <div class="aw-result-btns" v-if="done && !store.streaming && op !== 'review'">
-        <button class="apply" @click="apply">{{ applyLabel }}</button>
-        <button class="cp" @click="copyRes">复制</button>
-      </div>
-      <div class="aw-result-btns" v-else-if="done && !store.streaming && op === 'review'">
-        <button class="cp" @click="copyRes">复制全部意见</button>
-      </div>
-    </div>
+    </transition>
   </section>
 </template>
 
@@ -639,6 +680,14 @@ watch(
   min-width: 0;
   flex: 1;
 }
+.aw-hist-chap {
+  font-size: 11px;
+  color: var(--theme-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 92px;
+}
 .aw-hist-time {
   font-size: 11px;
   color: var(--theme-muted);
@@ -678,11 +727,13 @@ watch(
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.6;
-  padding: 8px 10px;
+  /* 右下角留出语音图标的位置（图标融入框角，不压正文） */
+  padding: 8px 38px 8px 10px;
   border: 1px solid var(--theme-line);
   border-radius: var(--radius-sm);
   background: var(--theme-field);
   color: var(--theme-ink);
+  transition: color 0.3s var(--motion);
 }
 .aw-ta:focus {
   outline: none;
@@ -690,6 +741,63 @@ watch(
 }
 .aw-ta:disabled {
   opacity: 0.6;
+}
+/* 思考等待中：方向文字已被「带走」，原位淡出 */
+.aw-ta.thinking {
+  color: transparent;
+}
+.aw-ta.thinking::placeholder {
+  color: transparent;
+}
+/* 方向文字起飞：从输入框飞向下方的「思考等待中」面板 */
+.aw-fly {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 64px);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--theme-accent-hover);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  animation: awFly 0.62s cubic-bezier(0.45, 0, 0.75, 0.35) forwards;
+}
+@keyframes awFly {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(1);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(150px) scale(0.42);
+  }
+}
+/* 等待面板退场 / 输出区进场：思考结束 → 文字内容平滑衔接 */
+.aw-fade-leave-active {
+  transition: opacity 0.3s var(--motion);
+}
+.aw-fade-leave-to {
+  opacity: 0;
+}
+.aw-rise-enter-active {
+  transition: opacity 0.45s var(--motion), transform 0.45s var(--motion);
+}
+.aw-rise-enter-from {
+  opacity: 0;
+  transform: translateY(18px) scale(0.985);
+}
+/* 重新生成时旧输出淡出，避免在等待面板出现前「啪」一下消失 */
+.aw-rise-leave-active {
+  transition: opacity 0.25s var(--motion), transform 0.25s var(--motion);
+}
+.aw-rise-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.99);
 }
 .aw-len {
   display: flex;
@@ -817,6 +925,30 @@ watch(
   flex-direction: column;
   padding: 10px 14px 14px;
   gap: 8px;
+}
+.aw-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.aw-result-cap {
+  font-size: 12px;
+  color: var(--theme-muted);
+  letter-spacing: 1px;
+}
+.aw-result-close {
+  font-size: 11.5px;
+  padding: 2px 10px;
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--theme-muted);
+  cursor: pointer;
+  transition: all 0.15s var(--motion);
+}
+.aw-result-close:hover {
+  border-color: var(--theme-error);
+  color: var(--theme-error);
 }
 .aw-text {
   flex: 1;

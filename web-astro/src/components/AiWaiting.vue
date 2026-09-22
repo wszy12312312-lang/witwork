@@ -42,7 +42,7 @@ const seconds = computed(() => (props.elapsedMs / 1000).toFixed(1));
 const statusText = computed(() => {
   if (props.hasText) return '正在流式输出…';
   const s = STAGES.find((x) => x.key === props.stage);
-  return s ? s.label + '…' : '准备中…';
+  return `思考等待中 · ${s ? s.label : '准备'}…`;
 });
 
 function stageState(key: string) {
