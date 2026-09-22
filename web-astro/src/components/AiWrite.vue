@@ -356,9 +356,10 @@ watch(
     </div>
     <div v-if="showHistory" class="aw-hist-list">
       <div
-        v-for="h in awHistory"
+        v-for="(h, hi) in awHistory"
         :key="h.id"
         class="aw-hist-item"
+        :style="{ animationDelay: hi * 36 + 'ms' }"
         title="点击载入：可改方向重新生成，或直接再次应用"
         @click="loadEntry(h)"
       >
@@ -492,6 +493,10 @@ watch(
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* 内容超出时可整体向下滚动（历史展开 / 输出很长时不再被截断） */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .aw-head {
   display: flex;
@@ -573,6 +578,12 @@ watch(
   background: transparent;
   color: var(--theme-ink-soft);
   cursor: pointer;
+  transition: transform var(--dur-base) var(--spring), border-color 0.25s var(--motion),
+    color 0.25s var(--motion), background 0.25s var(--motion);
+}
+.op:active {
+  transform: scale(0.94);
+  transition-duration: var(--dur-fast);
 }
 .op:hover {
   border-color: var(--theme-accent);
@@ -652,9 +663,23 @@ watch(
   background: var(--theme-field);
   padding: 7px 30px 7px 9px;
   cursor: pointer;
+  /* threeui 列表项入场：依次上浮（延迟由行内 animationDelay 控制） */
+  animation: awItemIn 0.46s var(--spring) both;
+  transition: transform var(--dur-base) var(--spring), border-color 0.25s var(--motion);
 }
 .aw-hist-item:hover {
   border-color: var(--theme-accent);
+  transform: translateX(2px);
+}
+.aw-hist-item:active {
+  transform: scale(0.99);
+  transition-duration: var(--dur-fast);
+}
+@keyframes awItemIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.98);
+  }
 }
 .aw-hist-meta {
   display: flex;
@@ -749,7 +774,8 @@ watch(
 .aw-ta.thinking::placeholder {
   color: transparent;
 }
-/* 方向文字起飞：从输入框飞向下方的「思考等待中」面板 */
+/* 方向文字起飞：threeui 语言 —— 弹簧缓动 + 位移缩放 + 失焦模糊，
+   收束到下方的「思考等待中」面板，落点不再生硬 */
 .aw-fly {
   position: absolute;
   left: 12px;
@@ -762,42 +788,56 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  animation: awFly 0.62s cubic-bezier(0.45, 0, 0.75, 0.35) forwards;
+  transform-origin: 20% 100%;
+  animation: awFly 0.72s var(--spring) forwards;
 }
 @keyframes awFly {
   0% {
     opacity: 0;
-    transform: translateY(0) scale(1);
+    transform: translate3d(0, 0, 0) scale(1);
+    filter: blur(0);
   }
-  18% {
+  20% {
     opacity: 1;
+    transform: translate3d(0, 12px, 0) scale(0.97);
   }
   100% {
     opacity: 0;
-    transform: translateY(150px) scale(0.42);
+    transform: translate3d(0, 172px, 0) scale(0.36);
+    filter: blur(2.6px);
   }
 }
-/* 等待面板退场 / 输出区进场：思考结束 → 文字内容平滑衔接 */
+/* 等待面板进场 / 退场：threeui 弹簧 */
+.aw-fade-enter-active {
+  transition: opacity 0.34s var(--spring), transform 0.4s var(--spring);
+}
+.aw-fade-enter-from {
+  opacity: 0;
+  transform: translate3d(0, -12px, 0) scale(0.97);
+}
 .aw-fade-leave-active {
-  transition: opacity 0.3s var(--motion);
+  transition: opacity 0.28s var(--expo-out), transform 0.28s var(--expo-out);
 }
 .aw-fade-leave-to {
   opacity: 0;
+  transform: translate3d(0, -8px, 0) scale(0.98);
 }
+/* 输出区进场：从等待态「化开」—— 上浮 + 微缩放 + 由模糊转清晰 */
 .aw-rise-enter-active {
-  transition: opacity 0.45s var(--motion), transform 0.45s var(--motion);
+  transition: opacity 0.5s var(--expo-out), transform 0.62s var(--spring), filter 0.5s var(--expo-out);
 }
 .aw-rise-enter-from {
   opacity: 0;
-  transform: translateY(18px) scale(0.985);
+  transform: translate3d(0, 24px, 0) scale(0.985);
+  filter: blur(4px);
 }
 /* 重新生成时旧输出淡出，避免在等待面板出现前「啪」一下消失 */
 .aw-rise-leave-active {
-  transition: opacity 0.25s var(--motion), transform 0.25s var(--motion);
+  transition: opacity 0.26s var(--expo-out), transform 0.26s var(--expo-out);
 }
 .aw-rise-leave-to {
   opacity: 0;
-  transform: translateY(-8px) scale(0.99);
+  transform: translate3d(0, -10px, 0) scale(0.99);
 }
 .aw-len {
   display: flex;
@@ -867,11 +907,46 @@ watch(
   padding: 7px 18px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  /* threeui：弹簧回弹 + 按下微缩 */
+  transition: transform var(--dur-base) var(--spring), background 0.25s var(--motion),
+    border-color 0.25s var(--motion), color 0.25s var(--motion), box-shadow 0.25s var(--motion);
+}
+.run:active:not(:disabled),
+.stop:active {
+  transform: scale(0.95);
+  transition-duration: var(--dur-fast);
 }
 .run {
+  position: relative;
+  overflow: hidden;
   background: var(--theme-solid-bg);
   color: var(--theme-solid-fg);
   border: 1px solid var(--theme-solid-bg);
+}
+/* threeui 扫光：hover 时一道高光掠过 */
+.run::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 28%,
+    color-mix(in srgb, var(--theme-solid-fg) 26%, transparent) 50%,
+    transparent 72%
+  );
+  transform: translateX(-130%);
+  pointer-events: none;
+}
+.run:hover:not(:disabled)::after {
+  animation: awSheen 0.95s var(--expo-out);
+}
+.run:hover:not(:disabled) {
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--theme-ink) 18%, transparent);
+}
+@keyframes awSheen {
+  to {
+    transform: translateX(130%);
+  }
 }
 .run:hover:not(:disabled) {
   background: var(--theme-solid-hover);
@@ -919,8 +994,9 @@ watch(
   background: color-mix(in srgb, var(--theme-error) 16%, transparent);
 }
 .aw-result {
-  flex: 1;
-  min-height: 0;
+  /* 1 0 auto：内容短时铺满剩余空间，内容长时撑开、由 .aw 整体滚动 */
+  flex: 1 0 auto;
+  min-height: 200px;
   display: flex;
   flex-direction: column;
   padding: 10px 14px 14px;
@@ -951,9 +1027,8 @@ watch(
   color: var(--theme-error);
 }
 .aw-text {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
+  /* 由外层 .aw 统一滚动，避免「输出区内部滚 + 面板滚」的双滚动条 */
+  flex: none;
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1002,9 +1077,14 @@ watch(
   color: var(--theme-solid-fg);
   border: 1px solid var(--theme-solid-bg);
   cursor: pointer;
+  transition: transform var(--dur-base) var(--spring), background 0.25s var(--motion);
 }
 .apply:hover {
   background: var(--theme-solid-hover);
+}
+.apply:active {
+  transform: scale(0.95);
+  transition-duration: var(--dur-fast);
 }
 .cp {
   font-size: 13px;
@@ -1014,6 +1094,12 @@ watch(
   background: transparent;
   color: var(--theme-ink-soft);
   cursor: pointer;
+  transition: transform var(--dur-base) var(--spring), border-color 0.25s var(--motion),
+    color 0.25s var(--motion);
+}
+.cp:active {
+  transform: scale(0.95);
+  transition-duration: var(--dur-fast);
 }
 .cp:hover {
   border-color: var(--theme-accent);

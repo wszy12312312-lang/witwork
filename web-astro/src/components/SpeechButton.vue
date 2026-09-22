@@ -1,18 +1,23 @@
 <script setup lang="ts">
 /**
- * 语音输入按钮（v2）：云端优先、本地兜底，绝不再「点了没反应」。
+ * 语音输入按钮（threeui 设计语言重制版）
  *
- * 引擎链路：
- *  1. 云端 Web Speech API（Chrome/Edge，识别质量最好）；
- *  2. 云端不可达（国内网络 / 离线，error=network|service-not-allowed）→
- *     自动切换「本地录音」：MediaRecorder 录音 → POST /api/asr/transcribe
- *     → 服务端 faster-whisper 离线转写（本产品本地优先，兜底走本地是正解）。
- *  3. 麦克风未授权 / 无设备等硬错误 → 气泡明确告知原因，不再静默失败。
+ * 视觉：取自 vendor/threeui 的 CircleButtons（src/shaders/circle-buttons/circle-buttons.css）
+ *   · 分层结构 aura / rim(orbit) / face / icon —— 与 threeui 的圆钮同构
+ *   · 缓动沿用 threeui 的 --spring: cubic-bezier(0.32, 0.72, 0, 1)
+ *   · 按下回弹（scale .92）、hover 微抬、aura 呼吸、orbit 环旋转
+ *   · 聆听中用 threeui 风格的等宽「均衡条」脉冲表示正在收音
+ *   · 状态气泡是 threeui HUD 样式（切角 + 等宽字 + 细描边）
  *
- * 识别文本通过 `result` 事件吐给父组件：
- *  - 云端：final 结果增量吐出（不重复插入）；
- *  - 本地：说完点击停止后整段吐出一次。
- * 父组件负责把文本插入目标输入框光标处。
+ * 引擎链路（关键修复）：
+ *   1. 云端 Web Speech API —— **不再要求先拿到麦克风**（Electron / 部分内嵌环境里
+ *      navigator.mediaDevices 可能缺失，之前那种「先 getUserMedia 再识别」的写法
+ *      会直接把本来能用的云端识别也一起废掉，正是写作界面点麦克风没反应的原因）。
+ *   2. 云端不可达（国内网络 / 离线，error=network|service-not-allowed）→ 自动切
+ *      「本地录音」：MediaRecorder → POST /api/asr/transcribe → faster-whisper 离线转写。
+ *   3. 麦克风未授权 / 无设备 / 引擎缺失 → 气泡明确说明原因，不再静默失败。
+ *
+ * 文本通过 `result` 事件吐给父组件：云端增量吐（不重复插入），本地整段吐一次。
  */
 import { ref, onBeforeUnmount } from 'vue';
 
@@ -25,7 +30,6 @@ const emit = defineEmits<{ (e: 'result', text: string): void }>();
 
 type Mode = 'idle' | 'cloud' | 'rec' | 'busy';
 const mode = ref<Mode>('idle');
-/** 气泡：云端 interim / 本地状态 / 错误原因 */
 const note = ref('');
 const noteErr = ref(false);
 let noteTimer: number | null = null;
@@ -58,22 +62,34 @@ function releaseStream() {
   }
 }
 
+function hasMicApi(): boolean {
+  return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+}
+
 async function ensureMic(): Promise<MediaStream> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error('此环境无法访问麦克风');
+  if (!hasMicApi()) throw new Error('no-media-devices');
   return await navigator.mediaDevices.getUserMedia({ audio: true });
 }
 
 async function start() {
   if (mode.value !== 'idle') return;
+  const SR = getSR();
+  // 云端优先，且不依赖 getUserMedia（Electron 里即使没有 mediaDevices 也可能可识别）
+  if (SR && !cloudDead) {
+    tryCloud(SR);
+    return;
+  }
+  if (!hasMicApi()) {
+    flash('此环境无法录音：需要 https 或 localhost 页面，且浏览器允许麦克风', true, 7000);
+    return;
+  }
   try {
     stream = await ensureMic();
   } catch {
     flash('无法访问麦克风：请在系统与浏览器设置中允许麦克风权限', true, 6000);
     return;
   }
-  const SR = getSR();
-  if (SR && !cloudDead) tryCloud(SR);
-  else startLocal();
+  startLocal();
 }
 
 /* ---------- 云端 Web Speech ---------- */
@@ -93,22 +109,19 @@ function tryCloud(SR: any) {
       if (r.isFinal) finalNow += r[0].transcript;
       else interimNow += r[0].transcript;
     }
-    // 只把新增的 final 部分吐给父组件（增量追加，不会重复插入）
     if (finalNow.length > emittedFinal.length) {
       const delta = finalNow.slice(emittedFinal.length);
       emittedFinal = finalNow;
       if (delta.trim()) emit('result', delta);
     }
-    if (interimNow) flash(interimNow, false, 0); // 中间结果常驻气泡，结束后清
+    if (interimNow) flash(interimNow, false, 0);
   };
   rec.onerror = (e: any) => {
     const err = e?.error || 'unknown';
     if (err === 'network' || err === 'service-not-allowed') {
-      // 云端识别服务不可达（国内网络 / 离线 / Electron）→ 自动转本地
       cleanupCloud();
       cloudDead = true;
-      flash('云端识别不可达，已改用本地识别（说完再点一次结束）', false, 6000);
-      startLocal();
+      void startLocalWithMic();
       return;
     }
     if (err === 'no-speech') {
@@ -128,8 +141,7 @@ function tryCloud(SR: any) {
     }
     cleanupCloud();
     cloudDead = true;
-    flash(`云端识别异常（${err}），已改用本地识别`, false, 6000);
-    startLocal();
+    void startLocalWithMic();
   };
   rec.onend = () => {
     if (mode.value === 'cloud') {
@@ -141,11 +153,11 @@ function tryCloud(SR: any) {
   try {
     rec.start();
     mode.value = 'cloud';
-    flash('聆听中…', false, 0);
+    flash('云端聆听中…', false, 0);
   } catch {
     cleanupCloud();
     cloudDead = true;
-    startLocal();
+    void startLocalWithMic();
   }
 }
 
@@ -163,17 +175,25 @@ function cleanupCloud() {
 
 /* ---------- 本地录音 → 服务端 faster-whisper ---------- */
 
-function startLocal() {
-  if (!stream) {
-    // 理论不可达（start 已拿到 stream）；兜底再取一次
-    ensureMic()
-      .then((s) => {
-        stream = s;
-        startLocal();
-      })
-      .catch(() => flash('无法访问麦克风', true));
+async function startLocalWithMic() {
+  if (!hasMicApi()) {
+    flash('云端识别不可达，且此环境无法录音（需 https/localhost + 麦克风）', true, 7000);
     return;
   }
+  if (!stream) {
+    try {
+      stream = await ensureMic();
+    } catch {
+      flash('无法访问麦克风：请在系统与浏览器设置中允许权限', true, 6000);
+      return;
+    }
+  }
+  startLocal();
+  flash('已改用本地识别：说完再点一次结束', false, 5000);
+}
+
+function startLocal() {
+  if (!stream) return;
   chunks = [];
   try {
     recorder = new MediaRecorder(stream);
@@ -237,21 +257,19 @@ async function transcribeLocal() {
 
 function toggle() {
   if (mode.value === 'cloud') {
-    // 手动结束云端：final 已增量吐出，直接收尾
     cleanupCloud();
     mode.value = 'idle';
     note.value = '';
     releaseStream();
   } else if (mode.value === 'rec') {
     try {
-      recorder?.stop(); // onstop → transcribeLocal
+      recorder?.stop();
     } catch {
       stopAll();
     }
   } else if (mode.value === 'idle') {
     void start();
   }
-  // busy：识别中，忽略点击
 }
 
 function stopAll() {
@@ -272,103 +290,240 @@ onBeforeUnmount(stopAll);
 </script>
 
 <template>
-  <span class="sb" :class="{ on: mode !== 'idle' }">
+  <span class="tu-mic">
     <button
       class="mic"
-      :class="{ live: mode === 'cloud' || mode === 'rec', busy: mode === 'busy' }"
+      :class="mode"
       :title="mode === 'cloud' || mode === 'rec' ? '停止语音输入' : (title || '语音输入')"
       :disabled="mode === 'busy'"
       @click="toggle"
     >
-      <span class="mic-ico">🎤</span>
-      <span v-if="mode === 'cloud' || mode === 'rec'" class="mic-live"></span>
+      <span class="aura" aria-hidden="true"></span>
+      <span class="orbit" aria-hidden="true"></span>
+      <span class="face" aria-hidden="true"></span>
+      <span v-if="mode === 'cloud' || mode === 'rec'" class="bars" aria-hidden="true">
+        <i></i><i></i><i></i>
+      </span>
+      <span v-else class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+          <rect x="9" y="2.6" width="6" height="11" rx="3" />
+          <path d="M5.6 11.6a6.4 6.4 0 0 0 12.8 0" />
+          <path d="M12 18.2v3.2" />
+          <path d="M8.6 21.4h6.8" />
+        </svg>
+      </span>
     </button>
-    <span v-if="note" class="mic-note" :class="{ err: noteErr }">{{ note }}</span>
+    <span v-if="note" class="tu-note" :class="{ err: noteErr }">{{ note }}</span>
   </span>
 </template>
 
 <style scoped>
-/* 融入输入框右下角：无边框、半透明、贴角，hover / 工作时才醒目 */
-.sb {
+/* ===== threeui CircleButtons 同构：aura / orbit(rim) / face / icon 分层 ===== */
+.tu-mic {
   position: relative;
   display: inline-flex;
 }
 .mic {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
+  --sz: 30px;
+  position: relative;
+  width: var(--sz);
+  height: var(--sz);
+  padding: 0;
+  border: 0;
   border-radius: 50%;
   background: transparent;
   color: var(--theme-muted);
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
-  position: relative;
-  opacity: 0.5;
-  transition: all 0.15s var(--motion);
+  isolation: isolate;
+  transform: translateZ(0);
+  transition: transform var(--dur-base) var(--spring), color 0.25s var(--motion);
+  -webkit-tap-highlight-color: transparent;
 }
 .mic:hover:not(:disabled) {
-  opacity: 1;
   color: var(--theme-accent-hover);
-  background: color-mix(in srgb, var(--theme-accent) 10%, transparent);
+  transform: translateY(-1px) scale(1.07);
+}
+.mic:active:not(:disabled) {
+  transform: scale(0.9);
+  transition-duration: var(--dur-fast);
 }
 .mic:disabled {
-  cursor: wait;
-  opacity: 0.7;
+  cursor: progress;
 }
-.mic.live {
-  opacity: 1;
+
+.face {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--theme-paper) 70%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  transition: all var(--dur-base) var(--spring);
+}
+.aura {
+  position: absolute;
+  inset: -7px;
+  z-index: 0;
+  border-radius: 50%;
+  opacity: 0;
+  background: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in srgb, currentColor 46%, transparent) 0%,
+    transparent 70%
+  );
+  filter: blur(6px);
+  transition: opacity var(--dur-base) var(--motion);
+}
+.mic:hover .aura {
+  opacity: 0.6;
+}
+.orbit {
+  position: absolute;
+  inset: -3px;
+  z-index: 2;
+  border-radius: 50%;
+  opacity: 0;
+  border: 1px dashed color-mix(in srgb, currentColor 55%, transparent);
+  transition: opacity var(--dur-base) var(--motion);
+}
+.icon {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+.icon svg {
+  width: 52%;
+  height: 52%;
+  overflow: visible;
+}
+
+/* 收音中：threeui 风格等宽均衡条脉冲 */
+.bars {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.bars i {
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: currentColor;
+  animation: tuBar 0.9s var(--motion) infinite;
+}
+.bars i:nth-child(2) {
+  height: 10px;
+  animation-delay: 0.15s;
+}
+.bars i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes tuBar {
+  0%,
+  100% {
+    transform: scaleY(0.5);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scaleY(1.7);
+    opacity: 1;
+  }
+}
+
+/* 状态：聆听 / 录音 / 识别中 */
+.mic.cloud,
+.mic.rec {
   color: var(--theme-error);
-  background: color-mix(in srgb, var(--theme-error) 12%, transparent);
-  animation: micBreath 1.2s ease-in-out infinite;
+}
+.mic.cloud .aura,
+.mic.rec .aura {
+  opacity: 0.8;
+  animation: tuPulse 1.8s var(--motion) infinite;
+}
+.mic.cloud .orbit,
+.mic.rec .orbit {
+  opacity: 0.85;
+  animation: tuOrbit 3.4s linear infinite;
 }
 .mic.busy {
-  opacity: 1;
   color: var(--theme-accent);
 }
-@keyframes micBreath {
+.mic.busy .orbit {
+  opacity: 1;
+  border-style: solid;
+  border-top-color: transparent;
+  animation: tuOrbit 1s linear infinite;
+}
+.mic.busy .aura {
+  opacity: 0.5;
+}
+@keyframes tuPulse {
   50% {
-    background: color-mix(in srgb, var(--theme-error) 24%, transparent);
+    transform: scale(1.28);
+    opacity: 0.38;
   }
 }
-.mic-live {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--theme-error);
-  animation: micPulse 1s var(--motion) infinite;
-}
-@keyframes micPulse {
-  50% {
-    opacity: 0.3;
+@keyframes tuOrbit {
+  to {
+    transform: rotate(360deg);
   }
 }
-.mic-note {
+
+/* 状态气泡：threeui HUD 样式（切角 + 等宽 + 细描边） */
+.tu-note {
   position: absolute;
-  bottom: 30px;
+  bottom: calc(100% + 8px);
   right: 0;
   z-index: 60;
-  font-size: 11.5px;
+  --chamfer: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--theme-ink-soft);
   background: var(--theme-paper);
   border: 1px solid var(--theme-line);
-  border-radius: var(--radius-sm);
-  padding: 3px 8px;
-  max-width: 230px;
+  padding: 4px 9px;
+  max-width: 240px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--theme-ink) 14%, transparent);
+  clip-path: polygon(
+    var(--chamfer) 0,
+    100% 0,
+    100% calc(100% - var(--chamfer)),
+    calc(100% - var(--chamfer)) 100%,
+    0 100%,
+    0 var(--chamfer)
+  );
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--theme-ink) 16%, transparent);
+  animation: tuNoteIn var(--dur-base) var(--spring);
 }
-.mic-note.err {
+.tu-note.err {
   color: var(--theme-error);
   border-color: color-mix(in srgb, var(--theme-error) 45%, var(--theme-line));
+}
+@keyframes tuNoteIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mic,
+  .face,
+  .aura,
+  .orbit,
+  .bars i,
+  .tu-note {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 </style>

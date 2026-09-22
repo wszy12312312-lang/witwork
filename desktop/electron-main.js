@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, shell, session } = require('electron');
 const { spawn } = require('child_process');
 const net = require('net');
 const path = require('path');
@@ -292,6 +292,29 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    // 麦克风授权：本地离线写作应用，语音输入需要在前端录音→后端 faster-whisper 识别。
+    // 页面跑在 http://127.0.0.1:8723（属安全上下文，navigator.mediaDevices 可用），
+    // 但 Electron 默认拒绝媒体权限，必须显式授权，否则 getUserMedia 永远 reject，
+    // 本地识别兜底链路拿不到音频流 —— 这正是「编辑器语音输入不可以使用」的根因。
+    try {
+      session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+        if (permission === 'media' || permission === 'microphone' || permission === 'audioCapture') {
+          callback(true);
+        } else {
+          callback(false);
+        }
+      });
+      // 部分 Electron 版本还会走 permission check（如自动播放/设备枚举），一并放行麦克风类
+      if (session.defaultSession.setPermissionCheckHandler) {
+        session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+          return permission === 'media' || permission === 'microphone' || permission === 'audioCapture';
+        });
+      }
+      log('已授权麦克风权限（语音输入可用）');
+    } catch (e) {
+      log('麦克风授权设置失败：' + String(e));
+    }
+
     // 生成桌面快捷方式后立即退出（供构建脚本调用）。
     // 用 Electron 原生 shell.writeShortcutLink —— 本机 COM 被安全策略拦截、手写 .lnk 也不被
     // Windows 接受（ERROR_NO_ASSOCIATION），只有这条原生路径能产出真正可用的 .lnk。

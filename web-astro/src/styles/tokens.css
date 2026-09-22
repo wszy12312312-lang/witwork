@@ -53,6 +53,12 @@
   --radius-sm: 6px;
   --shadow-panel: 0 26px 95px rgba(0, 0, 0, 0.55);
   --motion: cubic-bezier(0.22, 1, 0.36, 1); /* 临界阻尼慢动效 */
+  /* threeui 动效语言（取自 vendor/threeui：src/styles.css / shaders/*.css） */
+  --spring: cubic-bezier(0.32, 0.72, 0, 1);      /* threeui 最常用的「弹簧慢入」 */
+  --expo-out: cubic-bezier(0.16, 1, 0.3, 1);     /* 出场：快起慢收 */
+  --dur-fast: 0.18s;
+  --dur-base: 0.32s;
+  --dur-slow: 0.62s;
 
   /* 纯色模式（用户要求：不用磨砂/半透明，改用纯色）。
    * 100% 即完全不透明；若日后想恢复玻璃质感，把数值调回（如 62%）并加回 backdrop-filter 即可。 */

@@ -809,14 +809,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   display: flex;
   flex-direction: column;
 }
-/* GitHub 风格抽屉：遮罩淡入淡出，右侧面板自身从右缘滑入/滑出 */
+/* 抽屉：遮罩淡入淡出，右侧面板按 threeui 弹簧缓动滑入/滑出（带轻微缩放与阴影浮现） */
 .drawer-enter-active,
 .drawer-leave-active {
-  transition: opacity 0.28s var(--motion);
+  transition: opacity 0.3s var(--motion);
 }
 .drawer-enter-active > aside,
 .drawer-leave-active > aside {
-  transition: transform 0.32s var(--motion);
+  transition: transform 0.52s var(--spring), box-shadow 0.52s var(--spring),
+    opacity 0.34s var(--motion);
 }
 .drawer-enter-from,
 .drawer-leave-to {
@@ -824,7 +825,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 }
 .drawer-enter-from > aside,
 .drawer-leave-to > aside {
-  transform: translateX(100%);
+  transform: translate3d(100%, 0, 0) scale(0.985);
+  box-shadow: none;
 }
 .empty {
   color: var(--theme-muted);
