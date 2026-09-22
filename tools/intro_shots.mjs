@@ -33,14 +33,24 @@ const T_VEL_HOLD = 0.8; // 高速段结束，开始回落
 const T_GROW_START = 1.06; // 回落结束 == 放大开始（此刻角速度恰好等于背景速度）
 const T_GROW_END = 2.6;
 const T_DONE = 3.36;
-const BG_VEL_Y = 0.096;
-const BG_VEL_X = 0.036;
-const SPIN_EXTRA_Y = 2.55;
+const BG_VEL_Y = 0.3;
+const BG_VEL_X = 0.11;
+const SPIN_EXTRA_Y = 4.4;
 const S0 = 0.1;
+const GROW_SPIN_Y = 1.6; // 放大段额外自转峰值（鼓形剖面，两端归零）
+const GROW_SPIN_X = 0.6;
 const INTRO_WIRE_O = 0.92; // 待机/坍缩阶段棱球不透明度（与 App.vue 一致）
 // 理论上限角加速度：d/dt[SPIN_EXTRA_Y × (1 - smoothstep)] 的峰值
-// smoothstep 最大斜率 = 1.5 / 区间长度(0.26s) → 2.55 × 5.769 ≈ 14.71 rad/s²
+// smoothstep 最大斜率 = 1.5 / 区间长度(0.26s) → 4.4 × 5.769 ≈ 25.4 rad/s²
+// 放大段的鼓形额外自转峰值仅 ≈3.3 rad/s²（GROW_SPIN_Y × π × max(cos·gp')），
+// 远低于回落段上限 → MAX_ALPHA 仍是全程的理论上界。
 const MAX_ALPHA = (SPIN_EXTRA_Y * 1.5) / (T_GROW_START - T_VEL_HOLD);
+
+// 放大段额外自转剖面（与 App.vue 的 growSpinProfile 同式）
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+const growProgressOf = (t) => easeInOutSine(clamp01((t - T_GROW_START) / (T_GROW_END - T_GROW_START)));
+const growSpin = (t) => (t <= T_GROW_START || t >= T_GROW_END ? 0 : Math.sin(Math.PI * growProgressOf(t)));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fails = [];
@@ -227,14 +237,39 @@ if (samples.length > 10) {
   for (let i = 1; i < samples.length; i++) if (samples[i].spinY < samples[i - 1].spinY) back++;
   check('spinY 单调递增（角度累加器从不重置/取模）', back === 0, `回退 ${back} 帧`);
 
-  // A3 放大相位及之后：角速度恒等于背景角速度（需求 3 的核心）
-  const growSamples = samples.filter((s) => s.t >= T_GROW_START + 0.03);
-  const dy = Math.max(...growSamples.map((s) => Math.abs(s.velY - BG_VEL_Y)));
-  const dx = Math.max(...growSamples.map((s) => Math.abs(s.velX - BG_VEL_X)));
+  // A3 放大段：角速度 = 背景 + GROW_SPIN × 鼓形剖面（两端归零 → 进出都不跳）
+  const growIn = samples.filter((s) => s.t > T_GROW_START + 0.03 && s.t < T_GROW_END - 0.03);
+  const dyGrow = growIn.length ? Math.max(...growIn.map((s) => Math.abs(s.velY - (BG_VEL_Y + GROW_SPIN_Y * growSpin(s.t))))) : Infinity;
+  const dxGrow = growIn.length ? Math.max(...growIn.map((s) => Math.abs(s.velX - (BG_VEL_X + GROW_SPIN_X * growSpin(s.t))))) : Infinity;
   check(
-    `放大及背景阶段角速度严格等于背景速度（Δ<=1e-9）`,
-    growSamples.length > 30 && dy < 1e-9 && dx < 1e-9,
-    `样本 ${growSamples.length}, maxΔvelY=${dy.toExponential(2)}, maxΔvelX=${dx.toExponential(2)}`
+    '放大段角速度严格 == 背景 + GROW_SPIN×鼓形剖面（Δ<=1e-9）',
+    growIn.length > 20 && dyGrow < 1e-9 && dxGrow < 1e-9,
+    `样本 ${growIn.length}, maxΔvelY=${Number.isFinite(dyGrow) ? dyGrow.toExponential(2) : '—'}, maxΔvelX=${Number.isFinite(dxGrow) ? dxGrow.toExponential(2) : '—'}`
+  );
+
+  // A3b 放大结束进入背景后：角速度严格恒等于背景角速度
+  const afterGrow = samples.filter((s) => s.t >= T_GROW_END + 0.03);
+  const dyAfter = afterGrow.length ? Math.max(...afterGrow.map((s) => Math.abs(s.velY - BG_VEL_Y))) : Infinity;
+  const dxAfter = afterGrow.length ? Math.max(...afterGrow.map((s) => Math.abs(s.velX - BG_VEL_X))) : Infinity;
+  check(
+    '放大结束后角速度严格等于背景速度（Δ<=1e-9）',
+    afterGrow.length > 20 && dyAfter < 1e-9 && dxAfter < 1e-9,
+    `样本 ${afterGrow.length}, maxΔvelY=${Number.isFinite(dyAfter) ? dyAfter.toExponential(2) : '—'}, maxΔvelX=${Number.isFinite(dxAfter) ? dxAfter.toExponential(2) : '—'}`
+  );
+
+  // A3c 量化「放大时到底转了多少」——用户要的就是这个看得见
+  const gRows = samples.filter((s) => s.t >= T_GROW_START && s.t <= T_GROW_END);
+  const growTotalDeg = gRows.length > 1 ? ((gRows[gRows.length - 1].spinY - gRows[0].spinY) * 180) / Math.PI : 0;
+  const growPeakDeg = growIn.length ? (Math.max(...growIn.map((s) => s.velY)) * 180) / Math.PI : 0;
+  check(
+    '放大过程总转角 ≥ 85°（肉眼可见地边放大边旋转）',
+    growTotalDeg >= 85,
+    `实测 ${growTotalDeg.toFixed(1)}°，峰值角速度 ${growPeakDeg.toFixed(1)}°/s`
+  );
+  check(
+    '放大段额外自转恒 ≥ 0（只加速不减速、方向不变）',
+    growIn.length > 0 && growIn.every((s) => s.velY >= BG_VEL_Y - 1e-9),
+    `最小 velY=${growIn.length ? Math.min(...growIn.map((s) => s.velY)).toFixed(4) : '—'}（背景 ${BG_VEL_Y}）`
   );
 
   // A4 角加速度全程有界 → 说明「速度变化始终平滑」，任何阶段都没有阶跃突变。
@@ -263,11 +298,11 @@ if (samples.length > 10) {
   //     且与「减速段最后一帧按 dt 外推」的结果吻合（证明衔接处无断点）
   const gFirst = live.find((s) => s.t >= T_GROW_START);
   const decLast = dec.length ? dec[dec.length - 1] : null;
-  const drift = gFirst && decLast ? Math.abs((BG_VEL_Y - decLast.velY) / (gFirst.t - decLast.t)) : Infinity;
+  const drift = gFirst && decLast ? Math.abs((gFirst.velY - decLast.velY) / (gFirst.t - decLast.t)) : Infinity;
   check(
-    '跨界第一帧角速度 == 背景速度 且角加速度不超限',
-    !!gFirst && Math.abs(gFirst.velY - BG_VEL_Y) < 1e-9 && drift <= MAX_ALPHA * 1.06,
-    gFirst ? `velY=${gFirst.velY} (背景 ${BG_VEL_Y})，交界处 |Δv/Δt|=${drift.toFixed(2)}` : '无样本'
+    '跨界第一帧角速度 == 背景 + 剖面值，且角加速度不超限',
+    !!gFirst && Math.abs(gFirst.velY - (BG_VEL_Y + GROW_SPIN_Y * growSpin(gFirst.t))) < 1e-9 && drift <= MAX_ALPHA * 1.06,
+    gFirst ? `velY=${gFirst.velY}（背景 ${BG_VEL_Y} + 剖面 ${(GROW_SPIN_Y * growSpin(gFirst.t)).toFixed(5)}），交界处 |Δv/Δt|=${drift.toFixed(2)}` : '无样本'
   );
 
   // A5 缩放：待机与 morph 全程保持在 S0（→ 点击起播零归位跳变）、

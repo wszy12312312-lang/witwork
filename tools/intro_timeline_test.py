@@ -74,13 +74,14 @@ def main() -> int:
     js = re.sub(r"\)\s*\{", ") {", js)  # 归一化已有的写法
 
     # ---- 把 Three.js 对象替换成可观测的桩 ----
-    js = js.replace("group3d", "G").replace("wireMat", "WM").replace("innerMat", "IM")
+    js = js.replace("group3d", "G").replace("wireMat", "WM").replace("innerMat", "IM").replace("orbitMat", "OM")
 
     harness = """
 // ====== 桩：替代 Three.js 对象，记录缩放与不透明度 ======
 const G  = { scale: { s: 0, setScalar(v) { this.s = v; } } };
 const WM = { opacity: 0 };
 const IM = { opacity: 0 };
+const OM = { opacity: 0 };   // 环绕轨道粒子材质桩
 
 /*__INJECT__*/
 
@@ -93,12 +94,13 @@ let spinY = 0, spinX = 0;
 const rows = [];
 function frame(tv) {
   const p = velProfile(tv);
-  const vy = BG_VEL_Y + SPIN_EXTRA_Y * p;
-  const vx = BG_VEL_X + SPIN_EXTRA_X * p;
+  const gs = growSpinProfile(tv);
+  const vy = BG_VEL_Y + SPIN_EXTRA_Y * p + GROW_SPIN_Y * gs;
+  const vx = BG_VEL_X + SPIN_EXTRA_X * p + GROW_SPIN_X * gs;
   spinY += vy * DT;
   spinX += vx * DT;
   applySceneState(tv);
-  rows.push({ t: tv, vy, vx, spinY, scale: G.scale.s, wireO: WM.opacity, innerO: IM.opacity });
+  rows.push({ t: tv, vy, vx, spinY, scale: G.scale.s, wireO: WM.opacity, innerO: IM.opacity, orbitO: OM.opacity });
 }
 // 待机若干帧
 for (let i = 0; i < 30; i++) frame(-1);
@@ -116,16 +118,37 @@ const near = (a, b, eps) => Math.abs(a - b) <= eps;
 
 console.log("=== 时间轴常量（取自 App.vue）===");
 console.log(`  BG_VEL_Y=${BG_VEL_Y} BG_VEL_X=${BG_VEL_X} SPIN_EXTRA_Y=${SPIN_EXTRA_Y} SPIN_EXTRA_X=${SPIN_EXTRA_X}`);
+console.log(`  GROW_SPIN_Y=${GROW_SPIN_Y} GROW_SPIN_X=${GROW_SPIN_X}（放大段额外自转，两端归零）`);
 console.log(`  T_GROW_START=${T_GROW_START} T_GROW_END=${T_GROW_END} T_VEL_DOWN=${T_VEL_DOWN} S0=${S0}`);
 console.log(`  BG_WIRE_O=${BG_WIRE_O} BG_INNER_O=${BG_INNER_O} INTRO_WIRE_O=${INTRO_WIRE_O} INTRO_INNER_O=${INTRO_INNER_O}`);
 console.log();
 
-console.log("=== A1 放大阶段角速度 == 背景角速度（严格相等）===");
-const growRows = rows.filter(r => r.t >= T_GROW_START - 1e-9);
-const badVy = growRows.filter(r => r.vy !== BG_VEL_Y);
-const badVx = growRows.filter(r => r.vx !== BG_VEL_X);
-ok("T_GROW_START 及之后每一帧 vy === BG_VEL_Y", badVy.length === 0, badVy.length ? `异常 ${badVy.length} 帧，首帧 t=${badVy[0].t}` : `${growRows.length} 帧全部严格相等`);
-ok("T_GROW_START 及之后每一帧 vx === BG_VEL_X", badVx.length === 0, badVx.length ? `异常 ${badVx.length} 帧` : "OK");
+console.log("=== A1 放大段角速度剖面（两端精确收敛到背景速度）===");
+const growRows = rows.filter(r => r.t >= T_GROW_START - 1e-9 && r.t <= T_GROW_END + 1e-9);
+const badVy = growRows.filter(r => r.vy !== BG_VEL_Y + GROW_SPIN_Y * growSpinProfile(r.t));
+const badVx = growRows.filter(r => r.vx !== BG_VEL_X + GROW_SPIN_X * growSpinProfile(r.t));
+ok("放大段每帧 vy === BG_VEL_Y + GROW_SPIN_Y*growSpinProfile(t)", badVy.length === 0,
+   badVy.length ? `异常 ${badVy.length} 帧` : `${growRows.length} 帧全部严格相等`);
+ok("放大段每帧 vx === BG_VEL_X + GROW_SPIN_X*growSpinProfile(t)", badVx.length === 0,
+   badVx.length ? `异常 ${badVx.length} 帧` : "OK");
+const afterRows = rows.filter(r => r.t > T_GROW_END + 1e-9);
+const badAfter = afterRows.filter(r => r.vy !== BG_VEL_Y || r.vx !== BG_VEL_X);
+ok("放大结束后每一帧角速度 === 背景角速度（进入背景无速度突跳）", badAfter.length === 0,
+   badAfter.length ? `异常 ${badAfter.length} 帧` : `${afterRows.length} 帧全部严格相等`);
+ok("growSpinProfile 在放大区间两端严格为 0",
+   growSpinProfile(T_GROW_START) === 0 && growSpinProfile(T_GROW_END) === 0,
+   `起=${growSpinProfile(T_GROW_START)} 止=${growSpinProfile(T_GROW_END)}`);
+// 跨界速度跳变：放大最后一帧 → 放大后第一帧
+const lastGrowRow = growRows.slice(-1)[0];
+const firstAfterRow = afterRows[0];
+const boundaryJumpDeg = Math.abs(firstAfterRow.vy - lastGrowRow.vy) * 180 / Math.PI;
+ok("放大→背景 跨界速度跳变 < 0.5°/s", boundaryJumpDeg < 0.5, `实测 ${boundaryJumpDeg.toFixed(4)}°/s`);
+// 量化「放大时到底转了多少」：用户要的就是这个看得见
+const g0 = growRows[0].spinY, g1 = growRows.slice(-1)[0].spinY;
+const growTotalDeg = (g1 - g0) * 180 / Math.PI;
+const bgOnlyDeg = BG_VEL_Y * (T_GROW_END - T_GROW_START) * 180 / Math.PI;
+ok("放大过程总转角 ≥ 90°（肉眼可见地在旋转）", growTotalDeg >= 90,
+   `实测 ${growTotalDeg.toFixed(1)}°（其中背景分量仅 ${bgOnlyDeg.toFixed(1)}°，额外自转贡献 ${(growTotalDeg - bgOnlyDeg).toFixed(1)}°）`);
 console.log();
 
 console.log("=== A2 方向恒定 & 角度单调递增 ===");
@@ -146,16 +169,24 @@ for (let i = 2; i < rows.length; i++) {
 }
 const maxD2Deg = maxD2 * 180 / Math.PI;
 ok("最大逐帧角加速度 < 0.5°/帧²", maxD2Deg < 0.5, `实测 ${maxD2Deg.toFixed(4)}°/帧² @ t=${atT.toFixed(3)}s`);
-// 放大整段（角速度恒定）应为 0
-let growD2 = 0;
+// 放大段内部：额外自转剖面在鼓起/收回，角加速度有界但非零（这是「边放大边旋转」的来源）
+let growD2 = 0, growD2At = 0;
 for (let i = 2; i < rows.length; i++) {
-  // 只取「连续三帧都已进入放大相位」的样本：相位交界的那一帧必然包含
-  // 减速尾巴的最后一个微步，属正常过渡，不作为跳变判据
   if (rows[i - 2].t < T_GROW_START + DT) continue;
+  if (rows[i].t > T_GROW_END) continue;
   const d2 = Math.abs((rows[i].spinY - rows[i - 1].spinY) - (rows[i - 1].spinY - rows[i - 2].spinY));
-  growD2 = Math.max(growD2, d2);
+  if (d2 > growD2) { growD2 = d2; growD2At = rows[i].t; }
 }
-ok("放大相位内部及之后逐帧角增量完全相同（角加速度严格 = 0）", growD2 === 0, `实测 ${growD2}`);
+ok("放大段内部逐帧角加速度有界 < 0.1°/帧²（鼓形剖面平滑收放）", growD2 * 180 / Math.PI < 0.1,
+   `实测 ${(growD2 * 180 / Math.PI).toFixed(4)}°/帧² @ t=${growD2At.toFixed(3)}s`);
+// 放大结束之后：角速度恒定 = 背景速度 → 逐帧角增量必须完全相同
+let postD2 = 0;
+for (let i = 2; i < rows.length; i++) {
+  if (rows[i - 2].t <= T_GROW_END + DT) continue;
+  const d2 = Math.abs((rows[i].spinY - rows[i - 1].spinY) - (rows[i - 1].spinY - rows[i - 2].spinY));
+  postD2 = Math.max(postD2, d2);
+}
+ok("放大结束后逐帧角增量完全相同（角加速度严格 = 0）", postD2 === 0, `实测 ${postD2}`);
 console.log();
 
 console.log("=== A4 放大开始瞬间速度剖面已归零 ===");
@@ -187,12 +218,14 @@ console.log("=== A6 不透明度收敛到背景值 ===");
 const tail = rows.slice(-1)[0];
 ok("末帧 wireO === BG_WIRE_O", tail.wireO === BG_WIRE_O, `${tail.wireO} vs ${BG_WIRE_O}`);
 ok("末帧 innerO === BG_INNER_O", tail.innerO === BG_INNER_O, `${tail.innerO} vs ${BG_INNER_O}`);
+ok("末帧 orbitO === BG_ORBIT_O（轨道粒子收敛为背景点缀强度）", tail.orbitO === BG_ORBIT_O, `${tail.orbitO} vs ${BG_ORBIT_O}`);
 let maxOpJump = 0;
 for (let i = 1; i < rows.length; i++) {
   const base = rows[i].t < 0 || rows[i - 1].t < 0 ? 0 : 0;
   maxOpJump = Math.max(maxOpJump, Math.abs(rows[i].wireO - rows[i - 1].wireO));
+  maxOpJump = Math.max(maxOpJump, Math.abs(rows[i].orbitO - rows[i - 1].orbitO));
 }
-ok("逐帧不透明度变化 < 0.06（无闪现）", maxOpJump < 0.06, `最大 ${maxOpJump.toFixed(4)}`);
+ok("逐帧不透明度变化 < 0.06（无闪现，含轨道粒子）", maxOpJump < 0.06, `最大 ${maxOpJump.toFixed(4)}`);
 console.log();
 
 console.log("=== A7 起播瞬间不跳（待机态与 t=0 角速度一致）===");

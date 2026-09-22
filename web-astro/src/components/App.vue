@@ -22,6 +22,9 @@ let camera3d: THREE.PerspectiveCamera | null = null;
 let group3d: THREE.Group | null = null;
 let wireMat: THREE.LineBasicMaterial | null = null;
 let innerMat: THREE.MeshBasicMaterial | null = null;
+// 环绕轨道粒子：共用一份材质（便于统一控制不透明度），两圈粒子环绕棱球公转
+let orbitMat: THREE.PointsMaterial | null = null;
+let orbitRings: THREE.Object3D[] = [];
 
 // 档案体半径与取景留白（>1 表示图案四周留白，避免贴边/被裁切）
 const ARCHIVE_RADIUS = 2.15;
@@ -32,6 +35,9 @@ const MAX_WIDEN = 1.3; // 极端竖屏最多拉远到 1.3 倍，避免图案大�
 // 背景态的不透明度：线框棱球停在 BG_WIRE_O；内部小球在放大阶段被移除，背景态不含内层 → 0
 const BG_WIRE_O = 0.5;
 const BG_INNER_O = 0;
+// 环绕轨道粒子的不透明度：待机/坍缩时更亮（衬托大字后方的球），放大后收束为背景点缀
+const BG_ORBIT_O = 0.5;
+const INTRO_ORBIT_O = 1;
 // 待机/坍缩阶段的棱球不透明度：**待机即此值**（球从一开始就在大字后方可见），
 // 全程没有淡入——同一只球直接放大成背景，不存在「重新放置一只新球」。
 const INTRO_WIRE_O = 0.92;
@@ -39,15 +45,29 @@ const INTRO_INNER_O = 0.24;
 
 /* ==================== 启动动画时间轴 ====================
  * 旋转连续性（需求核心）：全场景只有一组自转角累加器 spinX / spinY，
- * 任何阶段都不重置、不做取模；角速度 = 背景基准速度 + velProfile(t) × 额外速度。
- * velProfile 在 t = T_VEL_DOWN 处平滑归零，而 T_GROW_START == T_VEL_DOWN，
- * 因此**放大过程中的角速度恒等于背景角速度，方向也完全一致**，
- * 放大结束进入背景后继续以同一角速度累加 → 角度/速度/方向连贯无跳变。
+ * 任何阶段都不重置、不做取模；
+ *   角速度 = 背景基准速度
+ *          + velProfile(t)      × 点击额外速度
+ *          + growSpinProfile(t) × 放大额外速度
+ * 两条额外速度剖面都在各自区间的两端**取值为 0、斜率也为 0**：
+ *   · velProfile 在 t = T_VEL_DOWN 平滑归零，而 T_GROW_START === T_VEL_DOWN；
+ *   · growSpinProfile 在放大区间的起点与终点都归零。
+ * 因此「放大开始」「放大结束进入背景」两个瞬间，角速度都严格等于背景角速度，
+ * 方向也完全一致 → 角度 / 速度 / 方向全程连贯无跳变。
  */
-const BG_VEL_Y = 0.096; // rad/s 背景基准自转（= 原 0.0016 rad/帧 @60fps）
-const BG_VEL_X = 0.036; // rad/s（= 原 0.0006 rad/帧 @60fps）
-const SPIN_EXTRA_Y = 2.55; // rad/s 点击瞬间叠加的高速自转
-const SPIN_EXTRA_X = 0.85;
+// 背景转速提高（用户反馈「字后面的球转得太慢」）：0.096 → 0.3 rad/s（≈17°/s）。
+const BG_VEL_Y = 0.3; // rad/s 背景基准自转（≈17°/s，约 21s 一圈）
+const BG_VEL_X = 0.11; // rad/s
+const SPIN_EXTRA_Y = 4.4; // rad/s 点击瞬间叠加的高速自转
+const SPIN_EXTRA_X = 1.5;
+// 放大阶段的额外自转（用户反馈「放大时旋转不明显」）：鼓形剖面，两端严格归零。
+// 峰值叠加在背景之上（合计 ≈1.9 rad/s ≈109°/s），1.54s 的放大过程因此多转 ≈88°，
+// 落位瞬间又恰好收回背景速度 —— 既看得见「边放大边旋转」，又不产生速度突跳。
+const GROW_SPIN_Y = 1.6; // rad/s
+const GROW_SPIN_X = 0.6; // rad/s
+// 环绕轨道粒子的公转角速度（相对棱球自身，两圈反向 → 观感像轨道）
+const ORBIT_VEL_A = 0.95; // rad/s 内圈
+const ORBIT_VEL_B = -0.62; // rad/s 外圈（反向）
 
 const T_VEL_UP = 0.34; // 0 → 高速
 const T_VEL_HOLD = 0.8; // 维持高速
@@ -86,6 +106,14 @@ function velProfile(t: number): number {
  *  实测逐帧缩放比变化峰值 ~4%（三次型是 7.6%，中段偏陡、观感略「冲」）。 */
 function growProgress(t: number): number {
   return easeInOutSine(clamp01((t - T_GROW_START) / (T_GROW_END - T_GROW_START)));
+}
+
+/** 放大阶段的额外自转剖面：区间两端严格为 0、且斜率为 0（growProgress 用的是
+ *  正弦缓动，其导数在 0/1 处本就为 0）→ 放大开始与结束两个瞬间的角速度
+ *  都精确等于背景角速度，进出放大段都不跳；中段鼓起，让「边放大边旋转」看得见。 */
+function growSpinProfile(t: number): number {
+  if (t <= T_GROW_START || t >= T_GROW_END) return 0;
+  return Math.sin(Math.PI * growProgress(t));
 }
 
 // ---- 启动动画状态 ----
@@ -139,7 +167,26 @@ async function setHud(on: boolean) {
 }
 
 // 暖色「三维档案终端」背景：缓慢自转的线框档案体，杏金描边。
-function initScene(): boolean {
+/** 圆形柔边点精灵：默认 Points 是方块，用它让轨道粒子是圆点。 */
+function makeDotTexture(): THREE.Texture {
+  const S = 64;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  if (ctx) {
+    const g = ctx.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.75)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, S, S);
+  }
+  const tex = new THREE.Texture(cv);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function initScene(withOrbit: boolean): boolean {
   const stage = document.getElementById('stage');
   if (!stage) return false;
   const scene = new THREE.Scene();
@@ -165,6 +212,46 @@ function initScene(): boolean {
   );
   group.add(wire, inner);
   scene.add(group);
+
+  // ---- 环绕轨道粒子 ----
+  // 两圈轻微倾斜、反向公转的粒子环，绕在棱球外圈。
+  // 放进 group 内 → 与棱球一同缩放/自转，永远是「围着球转的轨道」。
+  if (withOrbit) {
+    const baseR = ARCHIVE_RADIUS * ARCHIVE_SCALE;
+    const orb = new THREE.PointsMaterial({
+      color: 0xc9a468,
+      transparent: true,
+      opacity: BG_ORBIT_O,
+      map: makeDotTexture(),
+      // 关掉距离衰减：粒子按屏幕像素计大小，待机时球只有 S0=0.1，
+      // 若按世界单位缩放，待机阶段粒子会小到看不见。
+      sizeAttenuation: false,
+      size: 3.4,
+      depthWrite: false,
+    });
+    const defs = [
+      { n: 300, r: baseR * 1.22, tilt: 0.42, thick: 0.06, vel: ORBIT_VEL_A },
+      { n: 200, r: baseR * 1.52, tilt: -0.26, thick: 0.1, vel: ORBIT_VEL_B },
+    ];
+    for (const d of defs) {
+      const pos = new Float32Array(d.n * 3);
+      for (let i = 0; i < d.n; i++) {
+        const a = (i / d.n) * Math.PI * 2;
+        // 环半径带一点随机抖动 + 环面法向厚度，避免看起来像一条完美细线
+        const rr = d.r * (1 + (Math.random() - 0.5) * d.thick * 2);
+        pos[i * 3] = Math.cos(a) * rr;
+        pos[i * 3 + 1] = (Math.random() - 0.5) * baseR * d.thick;
+        pos[i * 3 + 2] = Math.sin(a) * rr;
+      }
+      const g2 = new THREE.BufferGeometry();
+      g2.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const pts = new THREE.Points(g2, orb);
+      pts.rotation.x = d.tilt;
+      group.add(pts);
+      orbitRings.push(pts);
+    }
+    orbitMat = orb;
+  }
 
   scene3d = scene;
   camera3d = camera;
@@ -214,6 +301,7 @@ function prepareIntroScene() {
   group3d.scale.setScalar(S0);
   wireMat.opacity = INTRO_WIRE_O;
   innerMat.opacity = INTRO_INNER_O;
+  if (orbitMat) orbitMat.opacity = INTRO_ORBIT_O;
 }
 
 /** 依据时间轴更新棱球的缩放与不透明度（旋转由主循环积分，不在这里碰）。 */
@@ -226,12 +314,14 @@ function applySceneState(t: number) {
       group3d.scale.setScalar(S0);
       wireMat.opacity = INTRO_WIRE_O;
       innerMat.opacity = INTRO_INNER_O;
+      if (orbitMat) orbitMat.opacity = INTRO_ORBIT_O;
       return;
     }
     // 未启用动画 / 已跳过 → 直接呈现背景态
     group3d.scale.setScalar(1);
     wireMat.opacity = BG_WIRE_O;
     innerMat.opacity = BG_INNER_O;
+    if (orbitMat) orbitMat.opacity = BG_ORBIT_O;
     return;
   }
   const settle = smoothstep(T_GROW_START, T_GROW_END, t);
@@ -243,6 +333,8 @@ function applySceneState(t: number) {
   // 只保留放大的线框棱球成为背景（需求：球体放大时去掉里面的小球）。
   const innerFade = smoothstep(T_GROW_START, T_GROW_START + 0.45, t);
   innerMat.opacity = INTRO_INNER_O * (1 - innerFade);
+  // 轨道粒子：与棱球一样从待机可见度平滑收束到背景点缀强度
+  if (orbitMat) orbitMat.opacity = INTRO_ORBIT_O * (1 - settle) + BG_ORBIT_O * settle;
 }
 
 function animate(now?: number) {
@@ -273,9 +365,18 @@ function animate(now?: number) {
 
   // ---- 自转：单一累加器，任何阶段都不重置 → 角度连续 ----
   const p = velProfile(introT);
-  spinY += (BG_VEL_Y + SPIN_EXTRA_Y * p) * dt;
-  spinX += (BG_VEL_X + SPIN_EXTRA_X * p) * dt;
+  const gs = growSpinProfile(introT);
+  const velY = BG_VEL_Y + SPIN_EXTRA_Y * p + GROW_SPIN_Y * gs;
+  const velX = BG_VEL_X + SPIN_EXTRA_X * p + GROW_SPIN_X * gs;
+  spinY += velY * dt;
+  spinX += velX * dt;
   if (group3d) group3d.rotation.set(spinX, spinY, 0);
+
+  // ---- 轨道粒子：绕棱球公转（在 group 内部，随球一起缩放/自转）----
+  if (orbitRings.length) {
+    orbitRings[0].rotation.y += ORBIT_VEL_A * dt;
+    if (orbitRings[1]) orbitRings[1].rotation.y += ORBIT_VEL_B * dt;
+  }
 
   applySceneState(introT);
   // 测试钩子（仅 ?introdebug=1 时开启）：把启动动画的实时状态暴露出来，
@@ -289,8 +390,9 @@ function animate(now?: number) {
       scale: group3d ? group3d.scale.x : 1,
       wireO: wireMat ? wireMat.opacity : 0,
       innerO: innerMat ? innerMat.opacity : 0,
-      velY: BG_VEL_Y + SPIN_EXTRA_Y * p,
-      velX: BG_VEL_X + SPIN_EXTRA_X * p,
+      orbitO: orbitMat ? orbitMat.opacity : 0,
+      velY,
+      velX,
     };
   }
   if (renderer && scene3d && camera3d) renderer.render(scene3d, camera3d);
@@ -337,7 +439,8 @@ onMounted(async () => {
     // 3D 背景失败绝不能拖垮整个应用：initScene 若抛错（如无 WebGL / 显卡驱动异常），
     // 以前会中断 onMounted，导致 bootstrap 不执行 → 主题、HUD、数据全不加载（近似空白页）。
     try {
-      sceneReady = initScene();
+      // 减少动态效果：不播启动动画，也不加环绕粒子（只保留静态线框背景）
+      sceneReady = initScene(!reduceMotion);
     } catch (e) {
       console.warn('[WitWork] 3D 背景初始化失败，已降级为纯色背景：', e);
     }
