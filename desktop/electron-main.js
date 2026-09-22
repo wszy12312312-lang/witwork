@@ -173,7 +173,21 @@ function startBackend() {
     ['-m', 'server.main'],
     {
       cwd: root,
-      env: { ...process.env, PYTHONPATH: root, INKREALM_DATA_DIR: dataDir },
+      // 本地离线识别（faster-whisper）根本不需要联网；若本机开了 Windows 系统代理，
+      // 把代理透传进后端会让模型加载/校验请求走代理 → 502。这里一律清掉代理变量，直连。
+      env: {
+        ...process.env,
+        PYTHONPATH: root,
+        INKREALM_DATA_DIR: dataDir,
+        NO_PROXY: '*',
+        no_proxy: '*',
+        HTTP_PROXY: '',
+        HTTPS_PROXY: '',
+        http_proxy: '',
+        https_proxy: '',
+        ALL_PROXY: '',
+        all_proxy: '',
+      },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     }
