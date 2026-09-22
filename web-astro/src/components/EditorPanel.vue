@@ -67,6 +67,18 @@ const outline = ref('');
 const menu = ref<{ show: boolean; x: number; y: number }>({ show: false, x: 0, y: 0 });
 let outlineTimer: ReturnType<typeof setTimeout> | null = null;
 
+// 右键「改写 ▸」预设方向子菜单：一点即按该方向改写选中文字，无需手填方向
+const REWRITE_DIRS = [
+  { key: 'polish', label: '润色', instruction: '润色这段文字，提升文笔与流畅度，保持原意和人物口吻' },
+  { key: 'colloquial', label: '更口语化', instruction: '把这段文字改得更口语化、自然，像角色日常说话' },
+  { key: 'formal', label: '更正式', instruction: '把这段文字改得更正式、书面、有文学质感' },
+  { key: 'condense', label: '精简去冗余', instruction: '精简这段文字，去掉冗余啰嗦的表达，保留核心信息' },
+  { key: 'expand', label: '扩写式改写', instruction: '以扩写方式改写这段文字，补充细节、心理与环境画面感' },
+];
+// 经由右键预设方向打开 AI 写作抽屉时，预填方向并自动生成
+const aiPresetInstruction = ref('');
+const aiPresetAutoRun = ref(false);
+
 watch(
   () => store.currentChapterId,
   async (id) => {
@@ -122,6 +134,17 @@ function closeMenu() {
 
 function openAiOp(o: 'rewrite' | 'continue' | 'expand' | 'shrink') {
   aiPresetOp.value = o;
+  aiPresetInstruction.value = '';
+  aiPresetAutoRun.value = false;
+  menu.value.show = false;
+  showAiWrite.value = true;
+}
+
+// 右键预设方向改写：预填方向 + 自动生成，实现「一点即改」
+function openRewriteDir(d: { key: string; label: string; instruction: string }) {
+  aiPresetOp.value = 'rewrite';
+  aiPresetInstruction.value = d.instruction;
+  aiPresetAutoRun.value = true;
   menu.value.show = false;
   showAiWrite.value = true;
 }
@@ -129,6 +152,8 @@ function openAiOp(o: 'rewrite' | 'continue' | 'expand' | 'shrink') {
 function closeAiWrite() {
   showAiWrite.value = false;
   aiPresetOp.value = null;
+  aiPresetInstruction.value = '';
+  aiPresetAutoRun.value = false;
 }
 
 function genOutline() {
@@ -354,7 +379,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             @click="onCursor"
             @select="onCursor"
             @contextmenu.prevent="onContextMenu"
-            placeholder="开始写作…（右键可选「扩写/缩写/修改/续写」）"
+            placeholder="开始写作…（右键可选「扩写/缩写/改写/修改/续写」）"
           ></textarea>
         </div>
         <div v-if="showPreview && store.preview" class="editor-right">
@@ -377,10 +402,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
       </div>
     </template>
 
-    <!-- 写作区右键菜单：扩写 / 缩写 / 修改 / 续写 -->
+    <!-- 写作区右键菜单：扩写 / 缩写 / 改写(预设方向) / 修改 / 续写 -->
     <div v-if="menu.show" class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }">
       <button class="ctx-item" @click="openAiOp('expand')">扩写</button>
       <button class="ctx-item" @click="openAiOp('shrink')">缩写</button>
+      <div class="ctx-sub">
+        <button class="ctx-item ctx-has-sub" @click="openAiOp('rewrite')">改写 ▸</button>
+        <div class="ctx-submenu">
+          <button
+            v-for="d in REWRITE_DIRS"
+            :key="d.key"
+            class="ctx-subitem"
+            @click="openRewriteDir(d)"
+          >{{ d.label }}</button>
+        </div>
+      </div>
       <button class="ctx-item" @click="openAiOp('rewrite')">修改</button>
       <button class="ctx-item" @click="openAiOp('continue')">续写</button>
     </div>
@@ -415,6 +451,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             :sel-end="selEnd"
             :chapter-title="title"
             :initial-op="aiPresetOp"
+            :initial-instruction="aiPresetInstruction"
+            :auto-run="aiPresetAutoRun"
             :outline-text="outline"
             @close="closeAiWrite"
             @apply-text="applyAiText"
@@ -1033,6 +1071,55 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   cursor: pointer;
 }
 .ctx-item:hover {
+  background: var(--theme-field);
+  color: var(--theme-accent-hover);
+}
+/* 右键「改写 ▸」预设方向子菜单 */
+.ctx-sub {
+  position: relative;
+}
+.ctx-has-sub {
+  width: 100%;
+}
+.ctx-submenu {
+  position: absolute;
+  left: 100%;
+  top: -4px;
+  min-width: 150px;
+  background: var(--theme-paper);
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(8, 10, 8, 0.28);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  transition: opacity 0.12s var(--motion), transform 0.12s var(--motion), visibility 0.12s;
+  pointer-events: none;
+  z-index: 51;
+}
+.ctx-sub:hover .ctx-submenu,
+.ctx-submenu:hover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.ctx-subitem {
+  text-align: left;
+  font-size: 13px;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--theme-ink-soft);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ctx-subitem:hover {
   background: var(--theme-field);
   color: var(--theme-accent-hover);
 }

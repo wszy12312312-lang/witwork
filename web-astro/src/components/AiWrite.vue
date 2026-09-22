@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue';
 import { store, aiOperate, stopAiOperate } from '../lib/store';
 import AiWaiting from './AiWaiting.vue';
 
@@ -12,6 +12,10 @@ const props = defineProps<{
   chapterTitle: string;
   initialOp?: 'rewrite' | 'continue' | 'expand' | 'shrink' | 'create' | 'review' | 'gen_outline' | 'gen_from_outline' | null;
   outlineText?: string;
+  /** 右键预设方向改写：预填的方向文案（非空即代表从右键预设打开） */
+  initialInstruction?: string;
+  /** 右键预设方向改写：打开即按预填方向自动生成 */
+  autoRun?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -106,6 +110,7 @@ function selectOp(o: Op) {
 
 async function run() {
   if (store.streaming) return;
+  if (runDisabled.value) return;
   result.value = '';
   done.value = false;
   finalElapsedMs.value = 0;
@@ -199,6 +204,20 @@ watch(
   () => props.initialOp,
   (o) => {
     if (o) op.value = o;
+  }
+);
+
+// 右键预设方向改写：预填方向；若 autoRun，则打开即自动生成（一点即改）
+if (props.initialInstruction && props.autoRun) {
+  instruction.value = props.initialInstruction;
+  nextTick(run);
+}
+watch(
+  () => [props.initialOp, props.initialInstruction, props.autoRun] as const,
+  ([o, instr, ar]) => {
+    if (o) op.value = o;
+    if (instr) instruction.value = instr;
+    if (ar && instr) nextTick(run);
   }
 );
 
