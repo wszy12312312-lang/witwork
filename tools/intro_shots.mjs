@@ -37,6 +37,7 @@ const BG_VEL_Y = 0.096;
 const BG_VEL_X = 0.036;
 const SPIN_EXTRA_Y = 2.55;
 const S0 = 0.1;
+const INTRO_WIRE_O = 0.92; // 待机/坍缩阶段棱球不透明度（与 App.vue 一致）
 // 理论上限角加速度：d/dt[SPIN_EXTRA_Y × (1 - smoothstep)] 的峰值
 // smoothstep 最大斜率 = 1.5 / 区间长度(0.26s) → 2.55 × 5.769 ≈ 14.71 rad/s²
 const MAX_ALPHA = (SPIN_EXTRA_Y * 1.5) / (T_GROW_START - T_VEL_HOLD);
@@ -184,7 +185,6 @@ const shots = [
   { at: 3.6, name: '06_bg_就位' },
 ];
 let shotIdx = 0;
-let ringsChecked = false;
 const samples = [];
 const t0 = Date.now();
 
@@ -194,14 +194,6 @@ while (Date.now() - t0 < 5200) {
   if (s) {
     s.wall = (Date.now() - t0) / 1000;
     samples.push(s);
-    // A5c：grow 阶段 DOM 实测双环组必须已隐藏（否则会弹回成棱球中心的「小球」）
-    if (!ringsChecked && s.phase === 'grow' && s.t > 1.3) {
-      ringsChecked = true;
-      const op = await evalJs(
-        `(() => { const el = document.querySelector('.intro .rings'); return el ? getComputedStyle(el).opacity : 'gone'; })()`
-      );
-      check('grow 阶段双环组已隐藏（不弹回成中心小球）', op === '0' || op === 'gone', `rings opacity=${op}`);
-    }
     while (shotIdx < shots.length && s.t >= shots[shotIdx].at) {
       const sz = await shoot(`${shots[shotIdx].name}.png`);
       console.log(`  采样 ${s.t.toFixed(3)}s phase=${s.phase} scale=${s.scale.toFixed(4)} 截图 ${shots[shotIdx].name} (${(sz / 1024).toFixed(1)}KB)`);
@@ -308,6 +300,16 @@ if (samples.length > 10) {
     '坍缩(morph)阶段内部小球曾作为内核出现，随后在放大时淡出',
     morphS.length > 5 ? innerAppeared : true,
     `坍缩段 ${morphS.length} 帧, 是否出现=${innerAppeared}`
+  );
+
+  // A5c 需求：待机起棱球就在场且不透明度恒定——是**同一只球**直接旋转变大，
+  //     不存在「淡入 / 重新放置一只新球」。
+  const preGrowO = samples.filter((s) => s.t >= 0 && s.t < T_GROW_START);
+  const notSteady = preGrowO.filter((s) => Math.abs(s.wireO - INTRO_WIRE_O) > 0.02).length;
+  check(
+    `起播前棱球已在场且不透明度恒定=${INTRO_WIRE_O}（同一只球直接放大，无淡入/重放）`,
+    preGrowO.length > 5 && notSteady === 0,
+    `起播前 ${preGrowO.length} 帧, 偏离 ${INTRO_WIRE_O} 的 ${notSteady} 帧`
   );
 
   // A6 背景就位后仍在持续转动（未被冻结）

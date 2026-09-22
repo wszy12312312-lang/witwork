@@ -10,9 +10,10 @@ import { onBeforeUnmount, onMounted } from 'vue';
  * 职责边界：本组件只负责「画面」，不碰 Three.js。棱球的放大与旋转由 App.vue
  * 的单一动画循环驱动（保证旋转角/角速度/方向在放大→背景的交接处绝对连续）。
  * 组件通过 phase 属性表现四个阶段：
- *   idle  初始：三个大字 + 动态背景（网格/辉光/双环/扫线）
- *   morph 点击后：大字旋转坍缩，双环向心坍缩再炸开，球体在同一位置浮现
- *   grow  放大：覆盖层已透明，只剩 WebGL 棱球在放大（由 App.vue 驱动）
+ *   idle  初始：三个大字 + 动态背景（网格/辉光/扫线）；大字后方就是那只
+ *         从待机起就在缓慢自转的 WebGL 棱球（App.vue 驱动）
+ *   morph 点击后：大字旋转坍缩；棱球就是待机那只，持续自转不重置
+ *   grow  放大：同一只棱球平滑放大成为背景（由 App.vue 驱动）
  *   ui    就位：操作层 UI 渐显，覆盖层整体淡出
  */
 const props = defineProps<{ phase: 'idle' | 'morph' | 'grow' | 'ui' | 'done' }>();
@@ -39,7 +40,9 @@ if (typeof window !== 'undefined') {
 
 <template>
   <div class="intro" :data-phase="phase" aria-label="万维文启动画面">
-    <!-- ① 底色 = 软件主题色（由 head 内联脚本预置的 data-theme 决定，与上次关闭前一致） -->
+    <!-- ① 底色交给 body（同一主题色，data-theme 预置）；paper 本身保持透明，
+         让 WebGL 棱球从待机起就透出在大字后方。保留元素与背景值供自动化验收
+         读取主题底色（getComputedStyle 不受 opacity 影响）。 -->
     <div class="paper"></div>
 
     <!-- ② 装饰层：细网格 + 暖杏金辉光 + 扫线 -->
@@ -58,20 +61,7 @@ if (typeof window !== 'undefined') {
     <div class="corner bl" aria-hidden="true"><i></i><span class="mono">汇万千思路 · 写一纸文章</span></div>
     <div class="corner br" aria-hidden="true"><span class="mono">v1.0</span><i></i></div>
 
-    <!-- ④ 线框双环：初始缓慢反向自转；点击后先向心坍缩、再炸开让位给棱球 -->
-    <div class="rings" aria-hidden="true">
-      <svg class="ring r1" viewBox="0 0 200 200">
-        <polygon points="100,8 179.6,54 179.6,146 100,192 20.4,146 20.4,54" />
-        <polyline points="100,8 179.6,146 20.4,146 100,8 20.4,54 179.6,54 100,192" />
-      </svg>
-      <svg class="ring r2" viewBox="0 0 200 200">
-        <polygon points="100,14 174.5,150 25.5,150" />
-        <polygon points="100,186 25.5,50 174.5,50" />
-      </svg>
-      <div class="core"></div>
-    </div>
-
-    <!-- ⑤ 主视觉：三个中文大字 -->
+    <!-- ④ 主视觉：三个中文大字（大字后方就是那只从待机起就在自转的 WebGL 棱球） -->
     <div class="logo" role="img" aria-label="万维文">
       <span
         v-for="(c, i) in chars"
@@ -82,7 +72,7 @@ if (typeof window !== 'undefined') {
       >
     </div>
 
-    <!-- ⑥ 底部：启动按钮 + 说明 -->
+    <!-- ⑤ 底部：启动按钮 + 说明 -->
     <div class="foot">
       <button class="launch" type="button" @click="emit('launch')">
         <span class="ln-main">点击启动</span>
@@ -92,7 +82,7 @@ if (typeof window !== 'undefined') {
       <p class="hint mono">按下 Enter 或点击上方按钮进入 · 汇万千思路，写一纸文章</p>
     </div>
 
-    <!-- ⑦ 跳过（直接进入软件，不播放动画） -->
+    <!-- ⑥ 跳过（直接进入软件，不播放动画） -->
     <button class="skip mono" type="button" @click="emit('skip')">跳过 ›</button>
   </div>
 </template>
@@ -113,17 +103,15 @@ if (typeof window !== 'undefined') {
   pointer-events: none;
 }
 
-/* ① 底色：主题纸面色。phase=morph 起淡出，露出背后的 WebGL 棱球 */
+/* ① 底色：交给 body（同一主题色）。paper 保持透明 → 待机的 WebGL 棱球
+ *    能从大字后方透出（它就是后续放大成背景的那只球，不重新放置）。
+ *    元素与 background 值保留，供自动化验收读取主题底色。 */
 .paper {
   position: absolute;
   inset: 0;
   background: var(--theme-paper);
-  transition: opacity 0.62s var(--motion) 0.1s;
-}
-.intro[data-phase='morph'] .paper,
-.intro[data-phase='grow'] .paper,
-.intro[data-phase='ui'] .paper {
   opacity: 0;
+  pointer-events: none;
 }
 
 /* ② 装饰层 */
@@ -316,101 +304,7 @@ if (typeof window !== 'undefined') {
   border-top: 0;
 }
 
-/* ④ 线框双环 —— 尺寸经标定：与 WebGL 棱球起始缩放 S0 的视觉大小一致
- * （S0 下棱球直径 ≈ 视口高度的 20.7%，竖屏由相机拉远补偿，
- *   正好等于 min(20.7vh, 20.7vw)，见 App.vue 的 S0 标定注释）*/
-.rings {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: min(20.7vh, 20.7vw);
-  height: min(20.7vh, 20.7vw);
-  margin: calc(min(20.7vh, 20.7vw) / -2) 0 0 calc(min(20.7vh, 20.7vw) / -2);
-  transform-origin: 50% 50%;
-  /* 仅作用于「跳过」路径（idle→ui）的优雅淡出；morph 期间 opacity 由 ringMorph 动画接管 */
-  transition: opacity 0.3s var(--motion);
-}
-.intro[data-phase='morph'] .rings {
-  animation: ringMorph 0.98s var(--motion) forwards;
-}
-/* grow/ui：双环已随 ringMorph 炸开淡出，必须**保持隐藏**。
-   缺了这条，phase 切到 grow 后 ringMorph 的选择器失效，
-   .rings 会瞬间弹回初始 scale/不透明状态，在放大的棱球正中心
-   显现成一个发光的小线框球——即用户要求去掉的「里面的小球」。 */
-.intro[data-phase='grow'] .rings,
-.intro[data-phase='ui'] .rings {
-  opacity: 0;
-}
-@keyframes ringMorph {
-  0% {
-    transform: scale(1);
-    opacity: 0.9;
-  }
-  42% {
-    transform: scale(0.14);
-    opacity: 1;
-  }
-  100% {
-    transform: scale(3.15);
-    opacity: 0;
-  }
-}
-.ring {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-.ring polygon,
-.ring polyline {
-  fill: none;
-  stroke: color-mix(in srgb, var(--theme-accent) 80%, transparent);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-.r1 {
-  animation: spinA 26s linear infinite;
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--theme-accent) 60%, transparent));
-}
-.r2 {
-  animation: spinB 34s linear infinite;
-}
-.r2 polygon {
-  stroke: color-mix(in srgb, var(--theme-accent-hover) 60%, transparent);
-  stroke-dasharray: 4 3;
-  stroke-width: 0.8;
-}
-@keyframes spinA {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-@keyframes spinB {
-  from {
-    transform: rotate(360deg);
-  }
-  to {
-    transform: rotate(0deg);
-  }
-}
-.core {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 16%;
-  height: 16%;
-  margin: -8% 0 0 -8%;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--theme-accent) 0%, transparent 70%);
-  opacity: 0.75;
-  animation: breathe 3.6s ease-in-out infinite;
-}
-
-/* ⑤ 主视觉大字 */
+/* ④ 主视觉大字（大字后方即待机起就在自转的 WebGL 棱球，见 App.vue） */
 .logo {
   position: relative;
   display: flex;
@@ -632,8 +526,6 @@ if (typeof window !== 'undefined') {
   .grid,
   .glow,
   .scan,
-  .ring,
-  .core,
   .launch::after,
   .ch {
     animation: none !important;

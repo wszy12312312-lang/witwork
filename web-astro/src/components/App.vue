@@ -32,7 +32,8 @@ const MAX_WIDEN = 1.3; // 极端竖屏最多拉远到 1.3 倍，避免图案大�
 // 背景态的不透明度：线框棱球停在 BG_WIRE_O；内部小球在放大阶段被移除，背景态不含内层 → 0
 const BG_WIRE_O = 0.5;
 const BG_INNER_O = 0;
-// 启动动画期间棱球更亮更实，随放大收束回背景态
+// 待机/坍缩阶段的棱球不透明度：**待机即此值**（球从一开始就在大字后方可见），
+// 全程没有淡入——同一只球直接放大成背景，不存在「重新放置一只新球」。
 const INTRO_WIRE_O = 0.92;
 const INTRO_INNER_O = 0.24;
 
@@ -56,8 +57,8 @@ const T_GROW_END = 2.6; // 放大到位，棱球成为背景
 const T_UI = 2.6; // 操作层开始渐显
 const T_DONE = 3.36; // 覆盖层移除
 
-// 棱球起始缩放：S0 时其视觉直径 ≈ 视口高度的 20.7%，
-// 与 Intro.vue 中线框双环的 min(20.7vh, 20.7vw) 尺寸标定一致（竖屏由相机拉远补偿后同样吻合）。
+// 棱球起始缩放：S0 时其视觉直径 ≈ 视口高度的 20.7%（竖屏由相机拉远补偿）。
+// 待机时这只球就在「万维文」大字后方以该尺寸缓慢自转，点击后同一只球直接放大成背景。
 const S0 = 0.1;
 
 // 测试钩子开关（?introdebug=1）：暴露每帧的旋转/缩放状态，供自动化量化验收
@@ -86,9 +87,6 @@ function velProfile(t: number): number {
 function growProgress(t: number): number {
   return easeInOutSine(clamp01((t - T_GROW_START) / (T_GROW_END - T_GROW_START)));
 }
-
-/** 棱球浮现进度（与大字坍缩、双环向心收缩衔接）。 */
-const appearProgress = (t: number) => smoothstep(0.3, 0.72, t);
 
 // ---- 启动动画状态 ----
 type Phase = 'idle' | 'morph' | 'grow' | 'ui' | 'done';
@@ -209,12 +207,13 @@ function initScene(): boolean {
   return true;
 }
 
-/** 把 group 摆到「启动动画起点」：小球 + 透明（此时被覆盖层挡住，全程不可见）。 */
+/** 把 group 摆到「待机态」：棱球在大字后方以 S0 缓慢自转、清晰可见——
+ *  它就是后续放大成背景的那只球（不重新放置、不淡入，点击起播零跳变）。 */
 function prepareIntroScene() {
   if (!group3d || !wireMat || !innerMat) return;
   group3d.scale.setScalar(S0);
-  wireMat.opacity = 0;
-  innerMat.opacity = 0;
+  wireMat.opacity = INTRO_WIRE_O;
+  innerMat.opacity = INTRO_INNER_O;
 }
 
 /** 依据时间轴更新棱球的缩放与不透明度（旋转由主循环积分，不在这里碰）。 */
@@ -222,11 +221,11 @@ function applySceneState(t: number) {
   if (!group3d || !wireMat || !innerMat) return;
   if (t < 0) {
     if (introPending) {
-      // 待机（覆盖层不透明挡着，用户看不到）：棱球已摆好起点，
-      // 点击起播时无需任何归位动作 → 不存在跳变风险。
+      // 待机：棱球在大字后方以 S0 可见自转（透过透明覆盖层露出），
+      // 点击起播时无需任何归位/淡入动作 → 不存在跳变风险。
       group3d.scale.setScalar(S0);
-      wireMat.opacity = 0;
-      innerMat.opacity = 0;
+      wireMat.opacity = INTRO_WIRE_O;
+      innerMat.opacity = INTRO_INNER_O;
       return;
     }
     // 未启用动画 / 已跳过 → 直接呈现背景态
@@ -235,16 +234,15 @@ function applySceneState(t: number) {
     innerMat.opacity = BG_INNER_O;
     return;
   }
-  const ap = appearProgress(t);
   const settle = smoothstep(T_GROW_START, T_GROW_END, t);
   // 指数式放大：从 S0 精确增长到 1
   group3d.scale.setScalar(S0 * Math.pow(1 / S0, growProgress(t)));
-  wireMat.opacity = (INTRO_WIRE_O * (1 - settle) + BG_WIRE_O * settle) * ap;
-  // 内部小球（inner）：仅在「字 → 球」坍缩阶段作为致密内核短暂出现；
-  // 进入放大（grow）后即刻平滑淡出，只保留放大的线框棱球成为背景
-  //（需求：球体放大时把里面的小球去掉，只保留放大的球）。
+  // 待机时已可见（INTRO_*），全程只随放大收束回背景态——同一只球，无淡入无重放
+  wireMat.opacity = INTRO_WIRE_O * (1 - settle) + BG_WIRE_O * settle;
+  // 内部小球（inner）：放大（grow）开始后 0.45s 内平滑淡出，
+  // 只保留放大的线框棱球成为背景（需求：球体放大时去掉里面的小球）。
   const innerFade = smoothstep(T_GROW_START, T_GROW_START + 0.45, t);
-  innerMat.opacity = INTRO_INNER_O * ap * (1 - innerFade);
+  innerMat.opacity = INTRO_INNER_O * (1 - innerFade);
 }
 
 function animate(now?: number) {
