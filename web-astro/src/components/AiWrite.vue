@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue';
 import { store, aiOperate, stopAiOperate } from '../lib/store';
+import { awCache, awHistory, pushAwHistory, removeAwHistory, clearAwHistory, type AwHistoryEntry } from '../lib/aiWriteCache';
+import SpeechButton from './SpeechButton.vue';
 import AiWaiting from './AiWaiting.vue';
 
 const props = defineProps<{
@@ -47,11 +49,18 @@ const LENGTHS = [
   { v: 2000, label: '约 2000 字' },
 ];
 
-const op = ref<Op>(props.initialOp || 'rewrite');
-const instruction = ref('');
-const result = ref('');
-const done = ref(false);
-const targetWords = ref(0);
+// 状态存于模块级 awCache（见 lib/aiWriteCache.ts）：关抽屉 / 切别的功能面板都不丢，
+// 软件重启后也能从 localStorage 恢复；这里初始化后双向镜像
+const op = ref<Op>(props.initialOp || awCache.op || 'rewrite');
+const instruction = ref(props.initialInstruction || awCache.instruction);
+const result = ref(awCache.result);
+const done = ref(awCache.done);
+const targetWords = ref(awCache.targetWords);
+// 自定义字数：>0 时优先于预设档位（创作 / 按大纲写 / 续写）
+const customWords = ref(awCache.customWords);
+const effWords = computed(() => (customWords.value > 0 ? customWords.value : targetWords.value));
+const showHistory = ref(false);
+const dirTa = ref<HTMLTextAreaElement | null>(null);
 
 // ---- 生成过程反馈：阶段 + 计时 ----
 const stage = ref<Stage>('idle');
@@ -142,7 +151,7 @@ async function run() {
       instruction: instruction.value,
       scope,
       provider_id: store.draftProviderId ?? null,
-      params: { target_words: targetWords.value || 0 },
+      params: { target_words: effWords.value || 0 },
     },
     (ev) => {
       if (ev.type === 'delta') {
@@ -157,6 +166,16 @@ async function run() {
         const d = ev.data as { elapsed_ms?: number; chars?: number } | null;
         finalElapsedMs.value = d?.elapsed_ms ?? elapsedMs.value;
         resultChars.value = d?.chars ?? result.value.length;
+        // 写入历史：操作 + 当时方向 + 生成内容 + 章节，之后可载入复用
+        pushAwHistory({
+          op: op.value,
+          opLabel: curOp.value.label,
+          instruction: instruction.value,
+          result: result.value,
+          bookId: props.bookId,
+          chapterId: props.chapterId,
+          chapterTitle: props.chapterTitle,
+        });
       }
     }
   );
@@ -221,6 +240,52 @@ watch(
   }
 );
 
+// 本地状态 → 模块级缓存（关抽屉 / 切面板不丢，localStorage 持久化在缓存模块里做）
+watch(
+  [op, instruction, result, done, targetWords, customWords],
+  () => {
+    awCache.op = op.value;
+    awCache.instruction = instruction.value;
+    awCache.result = result.value;
+    awCache.done = done.value;
+    awCache.targetWords = targetWords.value;
+    awCache.customWords = customWords.value;
+  }
+);
+
+// 语音输入：识别文本插入方向框光标处
+function onDirSpeech(text: string) {
+  const ta = dirTa.value;
+  const s = ta && typeof ta.selectionStart === 'number' ? ta.selectionStart : instruction.value.length;
+  instruction.value = instruction.value.slice(0, s) + text + instruction.value.slice(s);
+  nextTick(() => {
+    if (!ta) return;
+    const np = s + text.length;
+    ta.focus();
+    ta.setSelectionRange(np, np);
+  });
+}
+
+// 历史记录：载入一条（操作 + 方向 + 内容），可改方向重新生成或直接再应用
+function loadEntry(h: AwHistoryEntry) {
+  op.value = h.op;
+  instruction.value = h.instruction;
+  result.value = h.result;
+  done.value = true;
+  targetWords.value = 0;
+  customWords.value = 0;
+  showHistory.value = false;
+}
+
+function fmtTime(ts: number): string {
+  const d = Date.now() - ts;
+  if (d < 60_000) return '刚刚';
+  if (d < 3_600_000) return `${Math.floor(d / 60_000)} 分钟前`;
+  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)} 小时前`;
+  const dt = new Date(ts);
+  return `${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+}
+
 watch(
   () => store.streaming,
   (s) => {
@@ -276,12 +341,16 @@ watch(
     </div>
 
     <div class="aw-dir">
-      <textarea
-        v-model="instruction"
-        class="aw-ta"
-        :placeholder="curOp.need === 'book' ? '你的创作方向（可选，如：写一段雨夜追杀，节奏紧张）' : '你的方向（可选，如：更口语化 / 加强紧张感 / 缩短一半）'"
-        :disabled="store.streaming"
-      ></textarea>
+      <div class="aw-dir-wrap">
+        <textarea
+          ref="dirTa"
+          v-model="instruction"
+          class="aw-ta"
+          :placeholder="curOp.need === 'book' ? '你的创作方向（可选，如：写一段雨夜追杀，节奏紧张）' : '你的方向（可选，如：更口语化 / 加强紧张感 / 缩短一半）'"
+          :disabled="store.streaming"
+        ></textarea>
+        <SpeechButton class="aw-mic" title="语音输入方向" @result="onDirSpeech" />
+      </div>
     </div>
 
     <div v-if="showLength" class="aw-len">
@@ -290,16 +359,53 @@ watch(
         v-for="l in LENGTHS"
         :key="l.v"
         class="ln-btn"
-        :class="{ on: targetWords === l.v }"
+        :class="{ on: customWords <= 0 && targetWords === l.v }"
         :disabled="store.streaming"
-        @click="targetWords = l.v"
+        @click="targetWords = l.v; customWords = 0"
       >{{ l.label }}</button>
+      <input
+        v-model.number="customWords"
+        class="ln-custom"
+        type="number"
+        min="0"
+        step="100"
+        placeholder="自定义字数"
+        title="自定义目标字数，填了优先于上面的档位"
+        :disabled="store.streaming"
+      />
     </div>
 
     <div class="aw-btns">
       <button v-if="store.streaming" class="stop" @click="stopAiOperate">■ 停止</button>
       <button v-else class="run" :disabled="runDisabled" :title="runHint" @click="run">生成 ✦</button>
       <span v-if="runHint && !store.streaming" class="run-hint">{{ runHint }}</span>
+    </div>
+
+    <!-- 生成历史：操作 + 当时方向 + 内容，可载入后再编辑/再生成/再应用 -->
+    <div class="aw-hist">
+      <button class="aw-hist-toggle" @click="showHistory = !showHistory">
+        🕘 历史记录<span v-if="awHistory.length">（{{ awHistory.length }}）</span>
+        <span class="tri">{{ showHistory ? '▾' : '▸' }}</span>
+      </button>
+      <button v-if="showHistory && awHistory.length" class="aw-hist-clear" @click="clearAwHistory">清空</button>
+    </div>
+    <div v-if="showHistory" class="aw-hist-list">
+      <div
+        v-for="h in awHistory"
+        :key="h.id"
+        class="aw-hist-item"
+        title="点击载入：可改方向重新生成，或直接再次应用"
+        @click="loadEntry(h)"
+      >
+        <div class="aw-hist-meta">
+          <span class="aw-hist-op">{{ h.opLabel }}</span>
+          <span v-if="h.instruction" class="aw-hist-dir">方向：{{ h.instruction }}</span>
+          <span class="aw-hist-time">{{ fmtTime(h.ts) }}</span>
+        </div>
+        <div class="aw-hist-snip">{{ h.result.slice(0, 80) }}{{ h.result.length > 80 ? '…' : '' }}</div>
+        <button class="aw-hist-del" title="删除这条" @click.stop="removeAwHistory(h.id)">✕</button>
+      </div>
+      <div v-if="!awHistory.length" class="aw-hist-empty">还没有历史。生成一次就会记在这里。</div>
     </div>
 
     <!-- threeui 风格等待面板：只要还在生成就常驻，首字之后自动切换为「输出中」 -->
@@ -439,6 +545,127 @@ watch(
 .aw-dir {
   padding: 8px 14px;
 }
+.aw-dir-wrap {
+  position: relative;
+}
+.aw-mic {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+}
+.aw-hist {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--theme-line);
+}
+.aw-hist-toggle {
+  font-size: 12.5px;
+  border: none;
+  background: transparent;
+  color: var(--theme-ink-soft);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.aw-hist-toggle:hover {
+  color: var(--theme-accent-hover);
+}
+.aw-hist-toggle .tri {
+  font-size: 10px;
+  color: var(--theme-muted);
+}
+.aw-hist-clear {
+  font-size: 11.5px;
+  padding: 2px 9px;
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--theme-muted);
+  cursor: pointer;
+}
+.aw-hist-clear:hover {
+  border-color: var(--theme-error);
+  color: var(--theme-error);
+}
+.aw-hist-list {
+  max-height: 200px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--theme-line);
+}
+.aw-hist-item {
+  position: relative;
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: var(--theme-field);
+  padding: 7px 30px 7px 9px;
+  cursor: pointer;
+}
+.aw-hist-item:hover {
+  border-color: var(--theme-accent);
+}
+.aw-hist-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 3px;
+}
+.aw-hist-op {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-accent);
+  color: var(--theme-accent-hover);
+  white-space: nowrap;
+}
+.aw-hist-dir {
+  font-size: 11.5px;
+  color: var(--theme-ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.aw-hist-time {
+  font-size: 11px;
+  color: var(--theme-muted);
+  white-space: nowrap;
+}
+.aw-hist-snip {
+  font-size: 12px;
+  color: var(--theme-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.aw-hist-del {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  border: none;
+  background: transparent;
+  color: var(--theme-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.aw-hist-del:hover {
+  color: var(--theme-error);
+}
+.aw-hist-empty {
+  font-size: 12px;
+  color: var(--theme-muted);
+}
 .aw-ta {
   resize: none;
   height: 56px;
@@ -491,6 +718,22 @@ watch(
 .ln-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+.ln-custom {
+  width: 108px;
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--theme-line);
+  border-radius: var(--radius-sm);
+  background: var(--theme-field);
+  color: var(--theme-ink);
+}
+.ln-custom:focus {
+  outline: none;
+  border-color: var(--theme-accent);
+}
+.ln-custom:disabled {
+  opacity: 0.5;
 }
 .aw-btns {
   display: flex;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import {
   store,
   saveChapter,
@@ -29,6 +29,7 @@ import Stats from './Stats.vue';
 import Tools from './Tools.vue';
 import Roles from './Roles.vue';
 import RareCounter from './RareCounter.vue';
+import SpeechButton from './SpeechButton.vue';
 import { vMagnetRail } from '../lib/rare';
 
 const title = ref('');
@@ -126,6 +127,24 @@ function onContextMenu(e: MouseEvent) {
     selEnd.value = ta.selectionEnd ?? ta.selectionStart;
   }
   menu.value = { show: true, x: e.clientX, y: e.clientY };
+}
+
+// 语音输入：识别文本插入正文光标处
+const chapBody = ref<HTMLTextAreaElement | null>(null);
+function onBodySpeech(text: string) {
+  const s = selStart.value;
+  const e = selEnd.value;
+  content.value = content.value.slice(0, s) + text + content.value.slice(e);
+  const np = s + text.length;
+  selStart.value = np;
+  selEnd.value = np;
+  onInput();
+  nextTick(() => {
+    const ta = chapBody.value;
+    if (!ta) return;
+    ta.focus();
+    ta.setSelectionRange(np, np);
+  });
 }
 
 function closeMenu() {
@@ -371,16 +390,20 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
             </div>
             <textarea class="ob-ta" v-model="outline" @input="onOutlineInput" placeholder="写本节大纲，或点「想法转大纲」让 AI 生成…"></textarea>
           </div>
-          <textarea
-            class="chap-body"
-            v-model="content"
-            @input="onInput"
-            @keyup="onCursor"
-            @click="onCursor"
-            @select="onCursor"
-            @contextmenu.prevent="onContextMenu"
-            placeholder="开始写作…（右键可选「扩写/缩写/改写/修改/续写」）"
-          ></textarea>
+          <div class="chap-wrap">
+            <textarea
+              ref="chapBody"
+              class="chap-body"
+              v-model="content"
+              @input="onInput"
+              @keyup="onCursor"
+              @click="onCursor"
+              @select="onCursor"
+              @contextmenu.prevent="onContextMenu"
+              placeholder="开始写作…（右键可选「扩写/缩写/改写/修改/续写」）"
+            ></textarea>
+            <SpeechButton class="chap-mic" title="语音输入正文" @result="onBodySpeech" />
+          </div>
         </div>
         <div v-if="showPreview && store.preview" class="editor-right">
           <PhonePreview
@@ -965,11 +988,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   outline: none;
   border-color: var(--theme-accent);
 }
+.chap-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.chap-mic {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+}
 .chap-body {
   flex: 1;
   min-height: 0;
-  resize: none;
-  font-family: var(--font-sans);
+  resize: none;  font-family: var(--font-sans);
   font-size: var(--editor-font-size, 16px);
   line-height: var(--editor-line-height, 1.9);
   padding: 14px;

@@ -58,7 +58,13 @@ async function pickCard(c: Character) {
   // 列表项是完整行，但仍走 openCharacter 以连带加载出场/关系，避免「列表项当详情」类缺陷
   await openCharacter(c.id);
   loadBuf(store.characterCurrent);
+  detailOpen.value = true;
 }
+
+// 编辑详情卡展开/收起：保存成功后自动收起，点头部可再展开
+const detailOpen = ref(true);
+const saveTip = ref('');
+let tipTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function newCard() {
   const n = newName.value.trim();
@@ -83,6 +89,12 @@ async function saveCard() {
     taboo: eTaboo.value.trim() || null,
     aliases,
   });
+  // 保存失败（charError 有值）不收起，让用户看到错误；成功则收起编辑卡并短暂提示
+  if (store.charError) return;
+  detailOpen.value = false;
+  saveTip.value = '已保存 ✓';
+  if (tipTimer) clearTimeout(tipTimer);
+  tipTimer = setTimeout(() => (saveTip.value = ''), 2000);
 }
 
 async function delCard() {
@@ -195,10 +207,14 @@ const hasBook = computed(() => !!store.currentBookId);
         </div>
 
         <div v-if="store.characterCurrent" class="detail">
-          <div class="detail-h">
+          <div class="detail-h" :title="detailOpen ? '点击收起' : '点击展开'" @click="detailOpen = !detailOpen">
+            <span class="detail-tri">{{ detailOpen ? '▾' : '▸' }}</span>
             <span>编辑：{{ store.characterCurrent.name }}</span>
-            <RareDeleteButton @confirm="delCard" />
+            <span v-if="saveTip" class="ok">{{ saveTip }}</span>
+            <span class="detail-spacer"></span>
+            <RareDeleteButton @confirm="delCard" @click.stop />
           </div>
+          <template v-if="detailOpen">
           <label class="lbl">姓名</label>
           <input v-model="eName" class="inp" />
           <label class="lbl">别名（逗号分隔）</label>
@@ -217,6 +233,7 @@ const hasBook = computed(() => !!store.currentBookId);
             <button class="save" @click="saveCard">保存</button>
             <button class="rel" @click="quickRelateCurrent">＋ 加关系</button>
           </div>
+          </template>
         </div>
       </div>
 
@@ -477,10 +494,20 @@ const hasBook = computed(() => !!store.currentBookId);
 .detail-h {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   font-size: 13px;
   color: var(--theme-ink);
   margin-bottom: 2px;
+  cursor: pointer;
+  user-select: none;
+}
+.detail-tri {
+  font-size: 11px;
+  color: var(--theme-muted);
+  width: 12px;
+}
+.detail-spacer {
+  flex: 1;
 }
 .del {
   font-size: 12px;
