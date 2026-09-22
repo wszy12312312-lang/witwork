@@ -4,6 +4,11 @@
 import { reactive } from 'vue';
 import { api, type Book, type BookDetail, type Chapter, type Volume, type HistoryStatus, type PreviewResult, type TypesetChange, type Snapshot, type SearchHit, type SearchResult, type ReplacePreview, type ReplaceLog, type Provider, type Citation, type Session, type SessionMessage, type StreamEvent, type KbSection, type KbItem, type KbVersion, type KbHit, type KbReindexResult, type Persona, type PersonaVersion, type FrameworkState, type OutlineResult, type FrameworkPhase, type Character, type CharacterRelation, type CharacterAppearance, type Patch, type Foreshadow, type ForeshadowEvent, type ForeshadowAction, type ForeshadowScanMatch, type ForeshadowInjection, type Entry, type EntryCandidate, type EntryNormalizeResult, type BeatMark, type BeatTemplate, type BeatMetrics, type BeatSuggestion, type BeatKind, type DailyStat, type TodayStat, type WritingGoal, type UpdatePlan, type Notification, type WordFreqItem, type AiTasteResult, type ComplianceResult, type ServicesResult, type BackupItem, type ExportResult, type RoleTemplate, type TrashAll, type TrashedVolume, type TrashedChapter, type NowPlaying, type SongVolume, type SongAction } from './api';
 
+// 组件习惯从 store 导入这些类型；此处统一再导出，避免「导入不存在成员」的类型不一致。
+export type {
+  SessionMessage, Citation, FrameworkPhase, KbItem, KbVersion, Persona, PersonaVersion,
+} from './api';
+
 export const store = reactive({
   // 连接状态
   connected: false,
@@ -459,6 +464,15 @@ export async function loadProviders() {
   }
 }
 
+// 选择要使用的模型：用户设的默认 > 真实模型 > 任意启用项（最后才落到 mock 演示占位）。
+// 会话创建、打开会话、生成兜底统一走它，避免各处口径不一致导致「静默用上 mock」。
+export function pickProviderId(): string | null {
+  const enabled = store.providers.filter((p) => p.enabled);
+  const def = enabled.find((p) => p.is_default);
+  const real = enabled.filter((p) => p.kind !== 'mock');
+  return (def || real[0] || enabled[0])?.id ?? null;
+}
+
 export async function setProviderDefault(pid: string) {
   const r = await api.setDefaultProvider(pid);
   await loadProviders();
@@ -497,7 +511,7 @@ export async function openSession(sid: number) {
     if (idx >= 0) store.sessions[idx] = s;
     else store.sessions = [...store.sessions, s];
     store.sessionMessages = (s.messages || []) as SessionMessage[];
-    const active = (s.active_provider_id as string | null) || (store.providers.find((p) => p.enabled)?.id ?? null);
+    const active = (s.active_provider_id as string | null) || pickProviderId();
     store.draftProviderId = active;
   } catch (e) {
     store.aiError = (e as Error)?.message || '打开会话失败';
@@ -505,8 +519,28 @@ export async function openSession(sid: number) {
 }
 
 export async function createSessionForBook(title?: string) {
-  if (!store.currentBookId) return;
-  const pid = store.draftProviderId || (store.providers.find((p) => p.enabled)?.id ?? null);
+  // 未选中作品时不能直接 return —— 以前这里静默退出，界面毫无反馈，
+  // 加上错误条只在「已有会话」分支渲染，空态下任何报错都看不见，
+  // 表现就是「点了『新建会话』没反应」。
+  if (!store.currentBookId) {
+    if (!store.books.length) {
+      try {
+        await loadBooks();
+      } catch {
+        /* 交给下面的提示 */
+      }
+    }
+    const first = store.books[0];
+    if (first) {
+      // 有作品只是没选中：自动选用第一个可见作品，别让用户卡住
+      store.currentBookId = first.id;
+    } else {
+      store.aiError = '还没有作品：请先在左侧新建一个作品，再开始 AI 协作会话';
+      return;
+    }
+  }
+  const pid = store.draftProviderId || pickProviderId();
+  store.aiError = '';
   try {
     const s = await api.createSession(store.currentBookId, title?.trim() || '新会话', pid);
     await loadSessions();

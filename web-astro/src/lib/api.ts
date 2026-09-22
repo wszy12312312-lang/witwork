@@ -702,7 +702,7 @@ export const api = {
   listSnapshots: (chapterId: number) => getJSON<Snapshot[]>(`/chapters/${chapterId}/snapshots`),
   createSnapshot: (chapterId: number, payload: { title?: string; kind?: string }) =>
     send<Snapshot>(`/chapters/${chapterId}/snapshots`, 'POST', payload),
-  restoreSnapshot: (snapshotId: number) => send<Chapter>(`/snapshots/${snapshotId}/restore`, 'POST'),
+  restoreSnapshot: (snapshotId: number) => send<Chapter>(`/chapters/snapshots/${snapshotId}/restore`, 'POST'),
   diffSnapshot: (chapterId: number, snapshotId: number) =>
     getJSON<{ diff: unknown }>(`/chapters/${chapterId}/diff?snapshot_id=${snapshotId}`),
 
@@ -725,7 +725,7 @@ export const api = {
   replaceBook: (bookId: number, query: string, replacement: string, opts: Record<string, unknown> = {}) =>
     send<ReplacePreview>(`/books/${bookId}/replace`, 'POST', { query, replacement, ...opts }),
   listReplaceLogs: (bookId: number) => getJSON<ReplaceLog[]>(`/books/${bookId}/replace-logs`),
-  undoReplace: (rid: number) => send<unknown>(`/replace-logs/${rid}/undo`, 'POST'),
+  undoReplace: (rid: number) => send<unknown>(`/books/replace-logs/${rid}/undo`, 'POST'),
 
   // ---- Provider / 模型管理 ----
   providers: () => getJSON<Provider[]>('/providers'),

@@ -1,10 +1,11 @@
 """会话与 SSE 流式生成。"""
 import json
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 
 import server.adapters.providers as _reg  # 触发注册
+from server.models import books as book_m
 from server.models import sessions as sm
 from server.services import session as sess_svc
 
@@ -18,8 +19,14 @@ def list_sessions(book_id: int | None = None):
 
 @router.post("")
 def create_session(payload: dict):
+    book_id = payload.get("book_id")
+    # 校验作品：sessions.book_id 有外键约束，以前 book_id 为空/不存在时会抛出
+    # sqlite3.IntegrityError 变成 500，前端只看到「新建会话失败」。
+    book = book_m.get_book(book_id) if book_id else None
+    if not book or book.get("deleted_at"):
+        raise HTTPException(404, "作品不存在或已在回收站，请先新建或打开一个作品")
     return sess_svc.create_session(
-        book_id=payload.get("book_id"),
+        book_id=book_id,
         title=payload.get("title"),
         provider_id=payload.get("provider_id"),
     )

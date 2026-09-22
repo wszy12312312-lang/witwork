@@ -113,6 +113,10 @@ watch(() => store.currentSessionId, () => scrollToEnd());
       <button v-if="!store.currentSessionId" class="new-sess" @click="doNew">＋ 新会话</button>
     </div>
 
+    <!-- 错误条：放在会话区之外，空态与有会话态都能看到。
+         以前只写在「有会话」分支里，导致新建会话失败时界面毫无反馈。 -->
+    <div v-if="store.aiError" class="ai-err">⚠ {{ store.aiError }}</div>
+
     <!-- 会话列表 -->
     <div v-if="store.sessions.length" class="sess-row">
       <button
@@ -131,6 +135,7 @@ watch(() => store.currentSessionId, () => scrollToEnd());
     <div v-if="!store.currentSessionId" class="ai-empty">
       <p>还没有会话。</p>
       <button class="new-sess big" @click="doNew">＋ 新建协作会话</button>
+      <p v-if="!store.books.length" class="hint">还没有作品：请先在左侧新建作品，再回来开始协作会话。</p>
       <p class="hint">AI 会结合知识库检索、人格与当前章节上下文作答，并给出引用卡。</p>
     </div>
 
@@ -164,7 +169,6 @@ watch(() => store.currentSessionId, () => scrollToEnd());
           @stop="stopStreaming"
         />
       </div>
-      <div v-if="store.aiError" class="ai-err">⚠ {{ store.aiError }}</div>
     </div>
 
     <!-- 输入 -->
