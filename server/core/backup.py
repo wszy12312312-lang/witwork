@@ -61,6 +61,34 @@ def create_backup(tag=None, include_uploads=True):
             "created_at": datetime.now().isoformat(timespec="seconds")}
 
 
+def _resolve_backup(name) -> Path:
+    """把备份文件名解析为绝对路径。
+
+    以前直接 `BACKUP_DIR / name`，name 为 None / 非字符串时会抛
+    TypeError: unsupported operand type(s) for /: 'WindowsPath' and 'NoneType'，
+    而调用方只捕获 ValueError → 变成 500。这里统一转成 ValueError（→400）。
+    同时拒绝带路径分隔符的名字，避免越权读到 backups/ 之外的文件。
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("缺少备份文件名")
+    n = name.strip()
+    if n != Path(n).name:
+        raise ValueError("备份文件名非法（不允许包含路径分隔符）")
+    src = BACKUP_DIR / n
+    if not src.exists():
+        raise ValueError("备份不存在")
+    return src
+
+
+def _safe_join(base: Path, rel: str) -> Path:
+    """把 zip 内的相对路径安全地拼到 base 下，阻止 ../ 逃逸（zip slip）。"""
+    target = (base / rel).resolve()
+    base_r = base.resolve()
+    if target != base_r and base_r not in target.parents:
+        raise ValueError(f"备份内含非法路径：{rel}")
+    return target
+
+
 def list_backups():
     if not BACKUP_DIR.exists():
         return []
@@ -85,18 +113,14 @@ def apply_retention():
 
 
 def delete_backup(name):
-    src = BACKUP_DIR / name
-    if not src.exists():
-        raise ValueError("备份不存在")
+    src = _resolve_backup(name)
     src.unlink()
-    return {"name": name, "deleted": True}
+    return {"name": src.name, "deleted": True}
 
 
 def restore_backup(name, include_uploads=True):
     """恢复：先打 pre-restore 备份，再解压覆盖。"""
-    src = BACKUP_DIR / name
-    if not src.exists():
-        raise ValueError("备份不存在")
+    src = _resolve_backup(name)
     pre = create_backup("pre-restore-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
     restored = []
     with zipfile.ZipFile(src) as z:
@@ -109,7 +133,7 @@ def restore_backup(name, include_uploads=True):
             elif arc.startswith("uploads/"):
                 if not include_uploads:
                     continue
-                target = UPLOAD_DIR / arc[len("uploads/"):]
+                target = _safe_join(UPLOAD_DIR, arc[len("uploads/"):])
                 target.parent.mkdir(parents=True, exist_ok=True)
             elif arc == "secrets.enc":
                 target = SECRETS_PATH
@@ -123,9 +147,7 @@ def restore_backup(name, include_uploads=True):
 
 def drill(name):
     """恢复演练：解压到临时目录校验完整性，不改动线上数据。"""
-    src = BACKUP_DIR / name
-    if not src.exists():
-        raise ValueError("备份不存在")
+    src = _resolve_backup(name)
     tmp = Path(tempfile.mkdtemp(prefix="inkrealm_drill_"))
     ok, tables, err = False, 0, None
     try:

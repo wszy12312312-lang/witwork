@@ -45,8 +45,24 @@ def list_templates():
 def add_mark(book_id, chapter_id, kind, strength=3, offset=0, text=None, source="manual"):
     if kind not in KINDS:
         raise ValueError(f"未知爽点类型：{kind}")
+    # beat_marks.chapter_id 是 NOT NULL：以前不校验直接 INSERT，
+    # 缺失时抛 sqlite3.IntegrityError（不是 ValueError，API 层接不住）→ 500。
+    if chapter_id in (None, ""):
+        raise ValueError("缺少章节：爽点标记必须挂在某一章上")
+    try:
+        chapter_id = int(chapter_id)
+        book_id = int(book_id) if book_id not in (None, "") else None
+    except (TypeError, ValueError):
+        raise ValueError("book_id / chapter_id 必须是整数")
     conn = get_conn()
     try:
+        row = conn.execute(
+            "SELECT book_id FROM chapters WHERE id=? AND deleted_at IS NULL", (chapter_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError("章节不存在或已删除")
+        if book_id is None:
+            book_id = row["book_id"]
         cur = conn.execute(
             """INSERT INTO beat_marks(book_id, chapter_id, kind, strength, offset, text, source)
                VALUES (?,?,?,?,?,?,?)""",
