@@ -62,8 +62,14 @@ def frontend_calls(src: str):
     for m in re.finditer(r"\bsend\s*(?:<[^>]*>)?\s*\(\s*" + STR + r"\s*,\s*['\"`](\w+)['\"`]", src):
         out.append((m.group(1)[1:-1], m.group(2).upper()))
     # fetch(`${BASE}/x`)          → 流式接口，统一 POST（SSE 走 POST）
+    # 注意：通用传输 helper 内的 `fetch(`${BASE}${path}`)` 不是真实端点
+    #（path 是变量，无法静态解析），必须跳过 —— 否则会长期产生一条
+    #「POST /api{} 未匹配」的假阳性，掩盖真实问题。
     for m in re.finditer(r"fetch\(\s*`\$\{BASE\}([^`]*)`", src):
-        out.append((m.group(1), "POST"))
+        grp = m.group(1)
+        if grp.lstrip().startswith("${"):
+            continue
+        out.append((grp, "POST"))
     return [(norm_path(p), mth) for p, mth in out]
 
 

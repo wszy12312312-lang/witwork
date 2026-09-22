@@ -71,3 +71,6 @@ web-astro/build_out*.txt
 # ===== 其它临时/结果文件 =====
 e2e_typeset_result.json
 start.bat.utf8lf.bak
+
+# ===== 启动动画验收产出（tools/intro_shots.mjs 的阶段截图）=====
+_shots/

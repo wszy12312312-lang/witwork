@@ -19,6 +19,28 @@ const { title = '万维文 · WITWORK' } = Astro.props;
     <meta name="description" content="万维文 WitWork — 本地优先的人机实时协作写作系统：汇万千思路，写一纸文章。" />
     <title>{title}</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script is:inline>
+      // 首屏主题预热：在任何样式生效前把上次保存的主题写到 <html data-theme>。
+      // 目的：启动动画的底色 = 软件主题色，必须与「上一次关闭前保存的主题」一致，
+      // 且不能先画一帧默认暗色再跳到亮色（闪烁）。主题由 store.cacheTheme 镜像到
+      // localStorage，这里同步读取，零请求、零延迟。
+      (function () {
+        try {
+          var t = localStorage.getItem('inkrealm.theme') || 'dark';
+          if (t !== 'dark' && t !== 'light' && t !== 'sepia') t = 'dark';
+          document.documentElement.setAttribute('data-theme', t);
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) {
+            m.setAttribute(
+              'content',
+              t === 'light' ? '#f7f5f2' : t === 'sepia' ? '#efe6d3' : '#14130f'
+            );
+          }
+        } catch (e) {
+          /* 隐私模式等场景不可读，交回默认暗色 */
+        }
+      })();
+    </script>
   </head>
   <body data-pagefind-ignore>
     <main id="viewport">

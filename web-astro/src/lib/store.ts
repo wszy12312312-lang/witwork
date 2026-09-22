@@ -9,6 +9,36 @@ export type {
   SessionMessage, Citation, FrameworkPhase, KbItem, KbVersion, Persona, PersonaVersion,
 } from './api';
 
+// ---- 主题缓存（首屏同步可用）----
+// 启动动画与首屏底色都必须在「任何异步请求返回之前」就确定主题，
+// 否则会先按默认暗色画一帧、再跳到用户上次保存的主题（闪一下）。
+// 因此把生效主题镜像到 localStorage，并在 BaseLayout 的 head 内联脚本里预置 data-theme。
+export const THEME_CACHE_KEY = 'inkrealm.theme';
+export const THEMES = ['dark', 'light', 'sepia'] as const;
+
+/** 同步读取上次保存的主题（SSR / 无 localStorage 时回退 dark）。 */
+export function readCachedTheme(): string {
+  try {
+    if (typeof localStorage === 'undefined') return 'dark';
+    const t = localStorage.getItem(THEME_CACHE_KEY) || '';
+    return THEMES.includes(t as (typeof THEMES)[number]) ? t : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+/** 把主题镜像到 localStorage，供下次启动首屏使用。 */
+export function cacheTheme(t: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (THEMES.includes(t as (typeof THEMES)[number])) {
+      localStorage.setItem(THEME_CACHE_KEY, t);
+    }
+  } catch {
+    /* 隐私模式等场景写不了 localStorage，忽略 */
+  }
+}
+
 export const store = reactive({
   // 连接状态
   connected: false,
@@ -104,7 +134,7 @@ export const store = reactive({
   toolsServices: null as ServicesResult | null,
   toolsError: '',
   settings: null as Record<string, unknown> | null,
-  theme: 'dark',
+  theme: readCachedTheme(),
   editorFontSize: 18,
   editorLineHeight: 1.8,
   editorPageWidth: 720,
@@ -1486,7 +1516,8 @@ function applySettings() {
   const c = store.settings || {};
   // 历史配置可能残留已废弃的莱茵主题（rhine/rhine-light），统一兜底为 dark
   const rawTheme = (c['theme'] as string) || 'dark';
-  store.theme = ['dark', 'light', 'sepia'].includes(rawTheme) ? rawTheme : 'dark';
+  store.theme = THEMES.includes(rawTheme as (typeof THEMES)[number]) ? rawTheme : 'dark';
+  cacheTheme(store.theme); // 镜像到 localStorage，供下次启动首屏直接使用
   store.editorFontSize = Number(c['editor_font_size'] ?? 18);
   store.editorLineHeight = Number(c['editor_line_height'] ?? 1.8);
   store.editorPageWidth = Number(c['editor_page_width'] ?? 720);

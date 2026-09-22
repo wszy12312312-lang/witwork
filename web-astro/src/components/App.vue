@@ -1,23 +1,109 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue';
 import * as THREE from 'three';
-import { store, bootstrap, effectiveTheme, saveSettings } from '../lib/store';
+import { store, bootstrap, effectiveTheme, cacheTheme, saveSettings } from '../lib/store';
 import TreePanel from './TreePanel.vue';
 import EditorPanel from './EditorPanel.vue';
 import Settings from './Settings.vue';
 import AiSession from './AiSession.vue';
 import RareBell from './RareBell.vue';
+import Intro from './Intro.vue';
 import { vMagnetRail } from '../lib/rare';
 
 let renderer: THREE.WebGLRenderer | null = null;
 let raf = 0;
 let resizeObserver: ResizeObserver | null = null;
+let onResize: (() => void) | null = null;
+
+// 3D 场景引用：启动动画与软件背景**共用同一个 group / 材质**，
+// 这样「放大中的棱球」和「背景棱球」本来就是同一个对象，天然不会跳变。
+let scene3d: THREE.Scene | null = null;
+let camera3d: THREE.PerspectiveCamera | null = null;
+let group3d: THREE.Group | null = null;
+let wireMat: THREE.LineBasicMaterial | null = null;
+let innerMat: THREE.MeshBasicMaterial | null = null;
 
 // 档案体半径与取景留白（>1 表示图案四周留白，避免贴边/被裁切）
 const ARCHIVE_RADIUS = 2.15;
 const ARCHIVE_SCALE = 3; // 档案体放大 3 倍（用户要求）
 const FIT_MARGIN = 1.45;
 const MAX_WIDEN = 1.3; // 极端竖屏最多拉远到 1.3 倍，避免图案大小跳变
+
+// 背景态的不透明度（动画结束后停在这两个值）
+const BG_WIRE_O = 0.5;
+const BG_INNER_O = 0.12;
+// 启动动画期间棱球更亮更实，随放大收束回背景态
+const INTRO_WIRE_O = 0.92;
+const INTRO_INNER_O = 0.24;
+
+/* ==================== 启动动画时间轴 ====================
+ * 旋转连续性（需求核心）：全场景只有一组自转角累加器 spinX / spinY，
+ * 任何阶段都不重置、不做取模；角速度 = 背景基准速度 + velProfile(t) × 额外速度。
+ * velProfile 在 t = T_VEL_DOWN 处平滑归零，而 T_GROW_START == T_VEL_DOWN，
+ * 因此**放大过程中的角速度恒等于背景角速度，方向也完全一致**，
+ * 放大结束进入背景后继续以同一角速度累加 → 角度/速度/方向连贯无跳变。
+ */
+const BG_VEL_Y = 0.096; // rad/s 背景基准自转（= 原 0.0016 rad/帧 @60fps）
+const BG_VEL_X = 0.036; // rad/s（= 原 0.0006 rad/帧 @60fps）
+const SPIN_EXTRA_Y = 2.55; // rad/s 点击瞬间叠加的高速自转
+const SPIN_EXTRA_X = 0.85;
+
+const T_VEL_UP = 0.34; // 0 → 高速
+const T_VEL_HOLD = 0.8; // 维持高速
+const T_VEL_DOWN = 1.06; // 平滑回落，结束时恰好等于背景速度
+const T_GROW_START = 1.06; // 开始放大（此刻角速度已 == 背景速度）
+const T_GROW_END = 2.6; // 放大到位，棱球成为背景
+const T_UI = 2.6; // 操作层开始渐显
+const T_DONE = 3.36; // 覆盖层移除
+
+// 棱球起始缩放：S0 时其视觉直径 ≈ 视口高度的 20.7%，
+// 与 Intro.vue 中线框双环的 min(20.7vh, 20.7vw) 尺寸标定一致（竖屏由相机拉远补偿后同样吻合）。
+const S0 = 0.1;
+
+// 测试钩子开关（?introdebug=1）：暴露每帧的旋转/缩放状态，供自动化量化验收
+const introDebug =
+  typeof location !== 'undefined' && /[?&]introdebug=1/.test(location.search);
+
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = clamp01((x - a) / (b - a));
+  return t * t * (3 - 2 * t);
+};
+const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
+
+/** 额外角速度剖面：加速 → 保持 → 平滑归零（归零后角速度恒等于背景速度）。 */
+function velProfile(t: number): number {
+  if (t < 0) return 0;
+  if (t < T_VEL_UP) return smoothstep(0, T_VEL_UP, t);
+  if (t < T_VEL_HOLD) return 1;
+  if (t < T_VEL_DOWN) return 1 - smoothstep(T_VEL_HOLD, T_VEL_DOWN, t);
+  return 0;
+}
+
+/** 放大进度：指数式放大 → 观感是「匀速推近」，末段缓出，落点精确为 1。
+ *  缓动用正弦型（而非三次型）：峰值速率只有平均值的 1.57 倍，
+ *  实测逐帧缩放比变化峰值 ~4%（三次型是 7.6%，中段偏陡、观感略「冲」）。 */
+function growProgress(t: number): number {
+  return easeInOutSine(clamp01((t - T_GROW_START) / (T_GROW_END - T_GROW_START)));
+}
+
+/** 棱球浮现进度（与大字坍缩、双环向心收缩衔接）。 */
+const appearProgress = (t: number) => smoothstep(0.3, 0.72, t);
+
+// ---- 启动动画状态 ----
+type Phase = 'idle' | 'morph' | 'grow' | 'ui' | 'done';
+const introPhase = ref<Phase>('idle');
+const introEnabled = ref(true); // 覆盖层是否渲染
+const uiVisible = ref(false); // 操作层是否已浮现
+let introT = -1; // 启动动画已进行秒数；-1 = 未启动 / 已跳过 → 场景直接呈现背景态
+let introPending = false; // 覆盖层已就位、等待用户点击（此时棱球已摆好起点，起播零归位）
+let booted = false; // bootstrap 是否结束（操作层等它就绪后再浮现，避免空壳一闪）
+let phaseGrow = false;
+let phaseUi = false;
+let phaseDone = false;
+let spinX = 0;
+let spinY = 0;
+let lastFrame = 0;
 
 const showSettings = ref(false);
 
@@ -37,6 +123,13 @@ const workbenchStyle = computed(() => {
 function applyTheme(t: string) {
   if (typeof document === 'undefined') return;
   document.documentElement.setAttribute('data-theme', t || 'dark');
+  // 镜像到 localStorage：下次启动的 head 内联脚本据此在首屏就定好主题，
+  // 启动动画的底色因此与「上次关闭前保存的主题」一致（需求 5）。
+  cacheTheme(t || 'dark');
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) {
+    m.setAttribute('content', t === 'light' ? '#f7f5f2' : t === 'sepia' ? '#efe6d3' : '#14130f');
+  }
 }
 const themeAttr = computed(() => effectiveTheme());
 watch(() => store.theme, () => applyTheme(effectiveTheme()));
@@ -48,9 +141,9 @@ async function setHud(on: boolean) {
 }
 
 // 暖色「三维档案终端」背景：缓慢自转的线框档案体，杏金描边。
-function initScene() {
+function initScene(): boolean {
   const stage = document.getElementById('stage');
-  if (!stage) return;
+  if (!stage) return false;
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
   camera.position.set(0, 0, 6.2);
@@ -66,14 +159,20 @@ function initScene() {
   const geo = new THREE.IcosahedronGeometry(ARCHIVE_RADIUS * ARCHIVE_SCALE, 1);
   const wire = new THREE.LineSegments(
     new THREE.WireframeGeometry(geo),
-    new THREE.LineBasicMaterial({ color: 0xa67d48, transparent: true, opacity: 0.5 })
+    new THREE.LineBasicMaterial({ color: 0xa67d48, transparent: true, opacity: BG_WIRE_O })
   );
   const inner = new THREE.Mesh(
     geo,
-    new THREE.MeshBasicMaterial({ color: 0xcbb397, wireframe: true, transparent: true, opacity: 0.12 })
+    new THREE.MeshBasicMaterial({ color: 0xcbb397, wireframe: true, transparent: true, opacity: BG_INNER_O })
   );
   group.add(wire, inner);
   scene.add(group);
+
+  scene3d = scene;
+  camera3d = camera;
+  group3d = group;
+  wireMat = wire.material as THREE.LineBasicMaterial;
+  innerMat = inner.material as THREE.MeshBasicMaterial;
 
   // 视口自适应：档案体始终居中。
   // 关键：常见比例（横屏/方形）下相机距离完全固定 → 图案大小稳定、不会随窗口"变大变小"；
@@ -97,6 +196,7 @@ function initScene() {
     fitCamera(w, h);
   };
   resize();
+  onResize = resize;
   window.addEventListener('resize', resize);
   // 用 ResizeObserver 兜住布局变化（侧栏开合、布局 A/B 切换等）导致的尺寸变化
   if (typeof ResizeObserver !== 'undefined') {
@@ -104,37 +204,166 @@ function initScene() {
     resizeObserver.observe(stage);
   }
 
-  const animate = () => {
-    raf = requestAnimationFrame(animate);
-    group.rotation.y += 0.0016;
-    group.rotation.x += 0.0006;
-    renderer!.render(scene, camera);
-  };
+  lastFrame = 0;
   animate();
+  return true;
+}
+
+/** 把 group 摆到「启动动画起点」：小球 + 透明（此时被覆盖层挡住，全程不可见）。 */
+function prepareIntroScene() {
+  if (!group3d || !wireMat || !innerMat) return;
+  group3d.scale.setScalar(S0);
+  wireMat.opacity = 0;
+  innerMat.opacity = 0;
+}
+
+/** 依据时间轴更新棱球的缩放与不透明度（旋转由主循环积分，不在这里碰）。 */
+function applySceneState(t: number) {
+  if (!group3d || !wireMat || !innerMat) return;
+  if (t < 0) {
+    if (introPending) {
+      // 待机（覆盖层不透明挡着，用户看不到）：棱球已摆好起点，
+      // 点击起播时无需任何归位动作 → 不存在跳变风险。
+      group3d.scale.setScalar(S0);
+      wireMat.opacity = 0;
+      innerMat.opacity = 0;
+      return;
+    }
+    // 未启用动画 / 已跳过 → 直接呈现背景态
+    group3d.scale.setScalar(1);
+    wireMat.opacity = BG_WIRE_O;
+    innerMat.opacity = BG_INNER_O;
+    return;
+  }
+  const ap = appearProgress(t);
+  const settle = smoothstep(T_GROW_START, T_GROW_END, t);
+  // 指数式放大：从 S0 精确增长到 1
+  group3d.scale.setScalar(S0 * Math.pow(1 / S0, growProgress(t)));
+  wireMat.opacity = (INTRO_WIRE_O * (1 - settle) + BG_WIRE_O * settle) * ap;
+  innerMat.opacity = (INTRO_INNER_O * (1 - settle) + BG_INNER_O * settle) * ap;
+}
+
+function animate(now?: number) {
+  raf = requestAnimationFrame(animate);
+  const ms = typeof now === 'number' ? now : performance.now();
+  const dt = lastFrame ? Math.min(0.05, (ms - lastFrame) / 1000) : 1 / 60;
+  lastFrame = ms;
+
+  // ---- 时间轴推进：由渲染循环驱动，与画面严格同步 ----
+  if (introT >= 0) {
+    introT += dt;
+    if (!phaseGrow && introT >= T_GROW_START) {
+      phaseGrow = true;
+      introPhase.value = 'grow';
+    }
+    // 操作层等「背景就位」且「数据已就绪」后再浮现（数据最迟多等 2s，绝不无限期拖住）
+    if (!phaseUi && introT >= T_UI && (booted || introT >= T_UI + 2)) {
+      phaseUi = true;
+      introPhase.value = 'ui';
+      uiVisible.value = true;
+    }
+    if (!phaseDone && phaseUi && introT >= T_DONE) {
+      phaseDone = true;
+      introPhase.value = 'done';
+      introEnabled.value = false; // 卸载覆盖层
+    }
+  }
+
+  // ---- 自转：单一累加器，任何阶段都不重置 → 角度连续 ----
+  const p = velProfile(introT);
+  spinY += (BG_VEL_Y + SPIN_EXTRA_Y * p) * dt;
+  spinX += (BG_VEL_X + SPIN_EXTRA_X * p) * dt;
+  if (group3d) group3d.rotation.set(spinX, spinY, 0);
+
+  applySceneState(introT);
+  // 测试钩子（仅 ?introdebug=1 时开启）：把启动动画的实时状态暴露出来，
+  // 供 tools/intro_shots.mjs 在真实浏览器里量化「旋转角度/角速度/方向连续性」。
+  if (introDebug) {
+    (window as unknown as Record<string, unknown>)['__witworkIntro'] = {
+      t: introT,
+      phase: introPhase.value,
+      spinX,
+      spinY,
+      scale: group3d ? group3d.scale.x : 1,
+      wireO: wireMat ? wireMat.opacity : 0,
+      velY: BG_VEL_Y + SPIN_EXTRA_Y * p,
+      velX: BG_VEL_X + SPIN_EXTRA_X * p,
+    };
+  }
+  if (renderer && scene3d && camera3d) renderer.render(scene3d, camera3d);
+}
+
+/** 点击启动：进入「大字旋转坍缩 → 棱球浮现」阶段。 */
+function startLaunch() {
+  if (!introEnabled.value || introT >= 0) return; // 防止重复触发
+  introPending = false;
+  introT = 0;
+  introPhase.value = 'morph';
+  if (group3d && wireMat && innerMat) applySceneState(0); // 立刻归位到动画起点
+}
+
+/** 跳过启动动画：直接进入「背景就位 + 操作层渐显」，覆盖层随即淡出。 */
+function skipIntro() {
+  if (!introEnabled.value || phaseDone) return;
+  introPending = false;
+  introT = T_UI;
+  phaseGrow = true;
+  phaseUi = true;
+  introPhase.value = 'ui';
+  uiVisible.value = true;
 }
 
 onMounted(async () => {
   applyTheme(effectiveTheme());
-  // 3D 背景失败绝不能拖垮整个应用：initScene 若抛错（如无 WebGL / 显卡驱动异常），
-  // 以前会中断 onMounted，导致 bootstrap 不执行 → 主题、HUD、数据全不加载（近似空白页）。
-  // 另外支持 ?nofx=1 主动跳过 3D（低配设备 / 自动化截图）。
+
+  // 是否播放启动动画：
+  //  - ?nofx=1 或 ?intro=0：交给自动化截图/低配设备直接进软件
+  //  - prefers-reduced-motion：尊重系统「减少动态效果」
+  //  - 3D 初始化失败：没有棱球可放大，跳过动画避免半截效果
+  //  - ?intro=auto：无人值守自动起播（演示录屏 / 自动化截图采样各阶段用）
   const noFx = typeof location !== 'undefined' && /[?&]nofx=1/.test(location.search);
+  const introOff = typeof location !== 'undefined' && /[?&]intro=0/.test(location.search);
+  const introAuto = typeof location !== 'undefined' && /[?&]intro=auto/.test(location.search);
+  const reduceMotion =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let sceneReady = false;
   if (!noFx) {
+    // 3D 背景失败绝不能拖垮整个应用：initScene 若抛错（如无 WebGL / 显卡驱动异常），
+    // 以前会中断 onMounted，导致 bootstrap 不执行 → 主题、HUD、数据全不加载（近似空白页）。
     try {
-      initScene();
+      sceneReady = initScene();
     } catch (e) {
       console.warn('[WitWork] 3D 背景初始化失败，已降级为纯色背景：', e);
     }
   }
+
+  const play = sceneReady && !noFx && !introOff && !reduceMotion;
+  introEnabled.value = play;
+  introPhase.value = play ? 'idle' : 'done';
+  uiVisible.value = !play; // 不播动画时立即显示操作层
+  introPending = play; // 待机期间棱球已摆好起点，点击即起播、无归位跳变
+  if (play) prepareIntroScene();
+  else applySceneState(-1);
+
+  if (play && introAuto) {
+    // 自动起播：留 260ms 让首屏大字入场动画走完，便于采样到完整时序
+    setTimeout(() => startLaunch(), 260);
+  }
+
   try {
     await bootstrap();
   } catch {
     /* 连接失败已在 store.connected 标记 */
   }
+  booted = true;
 });
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf);
+  if (onResize) window.removeEventListener('resize', onResize);
   resizeObserver?.disconnect();
   resizeObserver = null;
   renderer?.dispose();
@@ -142,8 +371,18 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- 启动动画覆盖层：与 .shell 同级（body 直系子节点），因此不受 .shell 的
+       transform: scale() 影响，可用全局 fixed + z-index 盖在一切之上。 -->
+  <Intro
+    v-if="introEnabled"
+    :phase="introPhase"
+    @launch="startLaunch"
+    @skip="skipIntro"
+  />
+
   <div
     class="shell"
+    :class="{ 'shell-on': uiVisible }"
     :data-theme="themeAttr"
     :style="{
       '--editor-font-size': store.editorFontSize + 'px',
@@ -194,11 +433,24 @@ onBeforeUnmount(() => {
   /* 整体放大：width/height 反向除以 --ui-scale，使 scale 后仍精确铺满视口 */
   width: calc(100% / var(--ui-scale, 1));
   height: calc(100% / var(--ui-scale, 1));
-  transform: scale(var(--ui-scale, 1));
+  /* --intro-y：启动动画结束后的操作层「轻轻上浮到位」 */
+  transform: scale(var(--ui-scale, 1)) translateY(var(--intro-y, 0px));
   transform-origin: top left;
   display: flex;
   flex-direction: column;
   z-index: 2;
+  /* 启动动画期间操作层先隐藏，等背景棱球就位后再渐显浮现（需求 4）。 */
+  --intro-y: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.68s var(--motion),
+    transform 0.68s var(--motion);
+}
+.shell.shell-on {
+  opacity: 1;
+  --intro-y: 0px;
+  pointer-events: auto;
 }
 .topbar {
   position: relative;
