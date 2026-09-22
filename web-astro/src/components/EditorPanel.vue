@@ -594,12 +594,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 5;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .snap-aside {
   width: min(420px, 86%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -611,12 +611,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 6;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .ai-aside {
   width: min(440px, 90%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -628,12 +628,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 12;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .aw-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -645,12 +645,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 7;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .kb-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -662,12 +662,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 8;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .ps-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -679,12 +679,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 9;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .fw-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -696,12 +696,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 10;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .ch-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -713,12 +713,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 11;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .fs-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -730,12 +730,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 12;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .en-aside {
   width: min(460px, 92%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -747,12 +747,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 13;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .bt-aside {
   width: min(480px, 94%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -764,12 +764,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 14;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .st-aside {
   width: min(480px, 94%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -781,12 +781,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 15;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .tl-aside {
   width: min(480px, 94%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;
@@ -798,12 +798,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
   z-index: 16;
   display: flex;
   justify-content: flex-end;
-  background: var(--theme-scrim);
+  background: transparent; /* 不压暗背景，仅承接点击关闭 */
 }
 .rl-aside {
   width: min(480px, 94%);
   height: 100%;
-  background: color-mix(in srgb, var(--theme-paper) var(--drawer-alpha), transparent);
+  background: var(--theme-paper); /* 抽屉本体不透明 */
   border-left: 1px solid var(--theme-line);
   box-shadow: -12px 0 30px rgba(8, 10, 8, 0.25);
   display: flex;

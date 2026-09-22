@@ -61,6 +61,8 @@ const customWords = ref(awCache.customWords);
 const effWords = computed(() => (customWords.value > 0 ? customWords.value : targetWords.value));
 const showHistory = ref(false);
 const dirTa = ref<HTMLTextAreaElement | null>(null);
+// 本次生成接到的知识库条数（refs 事件），0 表示没有检到或未开启接地
+const kbRefs = ref(0);
 
 // ---- 生成过程反馈：阶段 + 计时 ----
 const stage = ref<Stage>('idle');
@@ -122,6 +124,7 @@ async function run() {
   if (runDisabled.value) return;
   result.value = '';
   done.value = false;
+  kbRefs.value = 0;
   finalElapsedMs.value = 0;
   resultChars.value = 0;
   stage.value = 'prepare';
@@ -159,6 +162,8 @@ async function run() {
       } else if (ev.type === 'status') {
         const d = ev.data as { stage?: string } | null;
         if (d?.stage) stage.value = d.stage as Stage;
+      } else if (ev.type === 'refs') {
+        kbRefs.value = (ev.data as unknown[] | null)?.length ?? 0;
       } else if (ev.type === 'error') {
         result.value = '⚠ ' + (ev.data as string);
       } else if (ev.type === 'done') {
@@ -427,7 +432,7 @@ watch(
     <div class="aw-result" v-if="result">
       <pre class="aw-text" :class="{ typing: store.streaming }">{{ stripFences(result) }}</pre>
       <div class="aw-meta mono" v-if="done && !store.streaming">
-        耗时 {{ (finalElapsedMs / 1000).toFixed(1) }}s · 约 {{ resultChars }} 字
+        耗时 {{ (finalElapsedMs / 1000).toFixed(1) }}s · 约 {{ resultChars }} 字<template v-if="kbRefs > 0"> · 已接知识库 {{ kbRefs }} 条设定</template>
       </div>
       <div class="aw-result-btns" v-if="done && !store.streaming && op !== 'review'">
         <button class="apply" @click="apply">{{ applyLabel }}</button>

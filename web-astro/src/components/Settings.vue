@@ -42,6 +42,8 @@ const form = reactive({
   hud_widgets: 'time,today,countdown,song,focus',
   song_autodetect: true,
   editor_ruled_lines: false,
+  ai_kb_grounding: true,
+  ai_kb_deep_analysis: false,
 });
 
 // 功能面板部件开关
@@ -85,6 +87,8 @@ function syncFormFromStore() {
   form.hud_widgets = (c['hud_widgets'] as string) || 'time,today,countdown,song,focus';
   form.song_autodetect = c['song_autodetect'] === undefined ? true : Boolean(c['song_autodetect']);
   form.editor_ruled_lines = Boolean(c['editor_ruled_lines'] ?? false);
+  form.ai_kb_grounding = c['ai_kb_grounding'] === undefined ? true : Boolean(c['ai_kb_grounding']);
+  form.ai_kb_deep_analysis = Boolean(c['ai_kb_deep_analysis'] ?? false);
 }
 
 const saving = ref(false);
@@ -492,6 +496,14 @@ function useDiscoveredModel(m: string) {
             <label class="fld check">
               <input v-model="form.editor_ruled_lines" type="checkbox" />
               <span>写作区信纸横线</span>
+            </label>
+            <label class="fld check">
+              <input v-model="form.ai_kb_grounding" type="checkbox" />
+              <span>AI 写作接知识库（改写/续写/扩写/创作等全部操作自动检索设定注入）</span>
+            </label>
+            <label class="fld check">
+              <input v-model="form.ai_kb_deep_analysis" type="checkbox" />
+              <span>AI 写作深度分析（检索条数翻倍，更慢但更全）</span>
             </label>
           </div>
           <div class="sub">功能面板</div>

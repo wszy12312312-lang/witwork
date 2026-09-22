@@ -26,6 +26,7 @@ from server.adapters.llm import get_adapter, LLMError
 from server.adapters.tokenizer import estimate_tokens
 from server.config import get as cfg_get
 from server.models import providers as pm, chapters as cm
+from server.services.kb_grounding import build_grounding
 
 # ---- 上下文预算（字符）----
 # 这些上限是有意设小的：本地模型（如 qwen3:14b）的可用上下文有限，
@@ -354,6 +355,13 @@ def operate_stream(
             user_content += f"\n\n【方向】\n{instruction}"
 
     system_prompt = _SYSTEM[operation] + _BASE_RULES
+
+    # ---- 知识库接地（全部操作通用）：检索设定 + 伏笔 + 人物卡注入 system ----
+    # 查询文本直接用刚组装的 user 内容（原文/上文/方向/大纲已含本次写作语境）。
+    citations, grounding = build_grounding(book_id, chapter_id, user_content[:800])
+    if grounding:
+        system_prompt = system_prompt + "\n\n" + grounding
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
@@ -370,7 +378,7 @@ def operate_stream(
     gen_params = dict(params or {})
     gen_params.setdefault("temperature", _TEMPERATURE.get(operation, 0.7))
 
-    yield {"type": "refs", "data": []}
+    yield {"type": "refs", "data": citations}
     provider_snapshot = {"kind": provider["kind"], "model": provider.get("model")}
     yield {"type": "status", "data": {"stage": "generating", "label": STAGE_LABELS["generating"]}}
 

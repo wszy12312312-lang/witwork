@@ -26,6 +26,62 @@ function toggleWidget(k: string) {
   saveSettings({ hud_widgets: order.filter((x) => s.has(x)).join(',') });
 }
 
+// ---------- 板块拖动排序 ----------
+// 内容区四个板块（事项/日程/歌曲/专注）可拖动改变上下位置，顺序存 localStorage。
+// 时钟按设计始终置顶，不参与排序。
+const LS_ORDER = 'inkrealm.dock.order';
+const WIDGET_DEFAULT_ORDER = ['today', 'countdown', 'song', 'focus'];
+const widgetOrder = ref<string[]>([...WIDGET_DEFAULT_ORDER]);
+function loadOrder() {
+  try {
+    const o = JSON.parse(localStorage.getItem(LS_ORDER) || '[]');
+    if (Array.isArray(o) && o.length) {
+      // 合并：新部件追加到末尾，去掉未知键
+      const merged = [...o.filter((x: string) => WIDGET_DEFAULT_ORDER.includes(x))];
+      for (const k of WIDGET_DEFAULT_ORDER) if (!merged.includes(k)) merged.push(k);
+      widgetOrder.value = merged;
+    }
+  } catch { /* ignore */ }
+}
+function saveOrder() {
+  try {
+    localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder.value));
+  } catch { /* ignore */ }
+}
+// 只显示「已启用」的板块，按用户拖出来的顺序
+const orderedWidgets = computed(() => {
+  const vis = widgetOrder.value.filter((k) => show(k));
+  // 安全兜底：顺序表漏掉的启用部件追加到末尾
+  for (const k of WIDGET_DEFAULT_ORDER) if (show(k) && !vis.includes(k)) vis.push(k);
+  return vis;
+});
+
+const dragKey = ref<string | null>(null);
+const armedKey = ref<string | null>(null); // 按住把手才允许拖，避免影响输入框选中文本
+function armDrag(k: string) { armedKey.value = k; }
+function disarmDrag() { armedKey.value = null; dragKey.value = null; }
+function onDragStart(k: string, e: DragEvent) {
+  dragKey.value = k;
+  armedKey.value = k;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', k);
+  }
+}
+function onDrop(k: string) {
+  const from = dragKey.value;
+  disarmDrag();
+  if (!from || from === k) return;
+  const arr = [...widgetOrder.value];
+  const fi = arr.indexOf(from);
+  const ti = arr.indexOf(k);
+  if (fi < 0 || ti < 0) return;
+  arr.splice(fi, 1);
+  arr.splice(ti, 0, from);
+  widgetOrder.value = arr;
+  saveOrder();
+}
+
 // ---------- 时间日期 ----------
 const now = ref(new Date());
 let tick: ReturnType<typeof setInterval> | null = null;
@@ -307,6 +363,7 @@ const focusSS = computed(() => p2(focusLeft.value % 60));
 async function toggleTexture() { await saveSettings({ hud_texture: !store.hudTexture }); }
 
 onMounted(() => {
+  loadOrder();
   loadTodos();
   loadCd();
   loadSong();
@@ -318,6 +375,7 @@ onMounted(() => {
     now.value = new Date();
     updateCd();
   }, 1000);
+  window.addEventListener('mouseup', disarmDrag);
 });
 // 开关自动检测 / 显隐歌曲部件 → 重新决定是否轮询
 watch([() => store.songAutodetect, () => show('song')], () => startSongPoll());
@@ -328,6 +386,7 @@ onBeforeUnmount(() => {
   if (focusTimer) clearInterval(focusTimer);
   stopSongPoll();
   stopMel();
+  window.removeEventListener('mouseup', disarmDrag);
 });
 </script>
 
@@ -343,10 +402,21 @@ onBeforeUnmount(() => {
       <div class="date mono">{{ dateStr }}</div>
     </section>
 
-    <!-- 功能内容 -->
+    <!-- 功能内容：板块可拖动排序（按住 ⠿ 把手上下拖） -->
     <div class="rd-body">
-      <section v-if="show('today')" class="w">
+      <template v-for="k in orderedWidgets" :key="k">
+      <section
+        v-if="k === 'today'"
+        class="w"
+        :class="{ dragging: dragKey === 'today' }"
+        :draggable="armedKey === 'today' || dragKey === 'today'"
+        @dragstart="onDragStart('today', $event)"
+        @dragover.prevent
+        @drop="onDrop('today')"
+        @dragend="disarmDrag"
+      >
         <div class="w-l mono">
+          <span class="grip" title="拖动调整顺序" @mousedown="armDrag('today')">⠿</span>
           今日事项 <em>{{ todoLeft }} 待办</em>
         </div>
         <div class="row">
@@ -363,8 +433,17 @@ onBeforeUnmount(() => {
         </ul>
       </section>
 
-      <section v-if="show('countdown')" class="w">
-        <div class="w-l mono">日程倒计时</div>
+      <section
+        v-else-if="k === 'countdown'"
+        class="w"
+        :class="{ dragging: dragKey === 'countdown' }"
+        :draggable="armedKey === 'countdown' || dragKey === 'countdown'"
+        @dragstart="onDragStart('countdown', $event)"
+        @dragover.prevent
+        @drop="onDrop('countdown')"
+        @dragend="disarmDrag"
+      >
+        <div class="w-l mono"><span class="grip" title="拖动调整顺序" @mousedown="armDrag('countdown')">⠿</span>日程倒计时</div>
         <div class="cd mono">
           <span class="cd-u"><b>{{ cdD }}</b>天</span>
           <span class="cd-u"><b>{{ p2(cdH) }}</b>时</span>
@@ -376,8 +455,18 @@ onBeforeUnmount(() => {
         <input v-model="cdTarget" class="in" type="datetime-local" @change="saveCd" />
       </section>
 
-      <section v-if="show('song')" class="w">
+      <section
+        v-else-if="k === 'song'"
+        class="w"
+        :class="{ dragging: dragKey === 'song' }"
+        :draggable="armedKey === 'song' || dragKey === 'song'"
+        @dragstart="onDragStart('song', $event)"
+        @dragover.prevent
+        @drop="onDrop('song')"
+        @dragend="disarmDrag"
+      >
         <div class="w-l mono">
+          <span class="grip" title="拖动调整顺序" @mousedown="armDrag('song')">⠿</span>
           歌曲信息
           <em>{{ songAuto ? (detected ? (detected.playing ? '系统检测·播放中' : '系统检测·已暂停') : '系统检测') : '手动' }}</em>
         </div>
@@ -478,8 +567,18 @@ onBeforeUnmount(() => {
         </template>
       </section>
 
-      <section v-if="show('focus')" class="w">
+      <section
+        v-else-if="k === 'focus'"
+        class="w"
+        :class="{ dragging: dragKey === 'focus' }"
+        :draggable="armedKey === 'focus' || dragKey === 'focus'"
+        @dragstart="onDragStart('focus', $event)"
+        @dragover.prevent
+        @drop="onDrop('focus')"
+        @dragend="disarmDrag"
+      >
         <div class="w-l mono">
+          <span class="grip" title="拖动调整顺序" @mousedown="armDrag('focus')">⠿</span>
           专注计时 <em>{{ focusDone }} 完成</em>
         </div>
         <div class="focus">
@@ -497,6 +596,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="break mono">休息时长 {{ breakMinutes }} 分</div>
       </section>
+      </template>
     </div>
 
     <!-- 底部功能导航 -->
@@ -584,6 +684,18 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: baseline;
 }
+/* 拖动排序：⠿ 把手 + 拖动中的板块高亮 */
+.grip {
+  cursor: grab;
+  color: var(--theme-muted);
+  font-size: 12px;
+  margin-right: 4px;
+  user-select: none;
+  transition: color 0.15s var(--motion);
+}
+.grip:hover { color: var(--theme-accent); }
+.w[draggable='true'] { cursor: grab; }
+.w.dragging { opacity: 0.45; border-color: var(--theme-accent); border-style: dashed; }
 .w-l em { font-style: normal; color: var(--theme-accent); }
 .w-sub { font-size: 11px; color: var(--theme-ink-soft); }
 .row { display: flex; gap: 6px; }

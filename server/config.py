@@ -59,6 +59,8 @@ DEFAULTS = {
     "song_autodetect": True,        # 歌曲部件：用系统 SMTC 自动检测当前播放（关＝纯手动填写）
     "editor_ruled_lines": False,    # 写作区信纸横线（随滚动对齐行高）
     "ai_timeout": 300,              # AI 单次请求超时（秒）：本地大模型首字慢，60s 会被中途掐断
+    "ai_kb_grounding": True,        # AI 写作全部操作接知识库：检索设定注入 + 伏笔/人物卡
+    "ai_kb_deep_analysis": False,   # 深度分析：检索条数翻倍（更慢但更全）
     "config_version": CONFIG_VERSION,
 }
 
