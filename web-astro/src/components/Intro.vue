@@ -327,9 +327,19 @@ if (typeof window !== 'undefined') {
   height: min(20.7vh, 20.7vw);
   margin: calc(min(20.7vh, 20.7vw) / -2) 0 0 calc(min(20.7vh, 20.7vw) / -2);
   transform-origin: 50% 50%;
+  /* 仅作用于「跳过」路径（idle→ui）的优雅淡出；morph 期间 opacity 由 ringMorph 动画接管 */
+  transition: opacity 0.3s var(--motion);
 }
 .intro[data-phase='morph'] .rings {
   animation: ringMorph 0.98s var(--motion) forwards;
+}
+/* grow/ui：双环已随 ringMorph 炸开淡出，必须**保持隐藏**。
+   缺了这条，phase 切到 grow 后 ringMorph 的选择器失效，
+   .rings 会瞬间弹回初始 scale/不透明状态，在放大的棱球正中心
+   显现成一个发光的小线框球——即用户要求去掉的「里面的小球」。 */
+.intro[data-phase='grow'] .rings,
+.intro[data-phase='ui'] .rings {
+  opacity: 0;
 }
 @keyframes ringMorph {
   0% {

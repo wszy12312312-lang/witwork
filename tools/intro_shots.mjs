@@ -184,6 +184,7 @@ const shots = [
   { at: 3.6, name: '06_bg_就位' },
 ];
 let shotIdx = 0;
+let ringsChecked = false;
 const samples = [];
 const t0 = Date.now();
 
@@ -193,6 +194,14 @@ while (Date.now() - t0 < 5200) {
   if (s) {
     s.wall = (Date.now() - t0) / 1000;
     samples.push(s);
+    // A5c：grow 阶段 DOM 实测双环组必须已隐藏（否则会弹回成棱球中心的「小球」）
+    if (!ringsChecked && s.phase === 'grow' && s.t > 1.3) {
+      ringsChecked = true;
+      const op = await evalJs(
+        `(() => { const el = document.querySelector('.intro .rings'); return el ? getComputedStyle(el).opacity : 'gone'; })()`
+      );
+      check('grow 阶段双环组已隐藏（不弹回成中心小球）', op === '0' || op === 'gone', `rings opacity=${op}`);
+    }
     while (shotIdx < shots.length && s.t >= shots[shotIdx].at) {
       const sz = await shoot(`${shots[shotIdx].name}.png`);
       console.log(`  采样 ${s.t.toFixed(3)}s phase=${s.phase} scale=${s.scale.toFixed(4)} 截图 ${shots[shotIdx].name} (${(sz / 1024).toFixed(1)}KB)`);
@@ -284,6 +293,22 @@ if (samples.length > 10) {
   let shrink = 0;
   for (let i = 1; i < samples.length; i++) if (samples[i].scale < samples[i - 1].scale - 1e-9) shrink++;
   check('缩放全程单调递增（放大过程无回缩）', shrink === 0, `回缩 ${shrink} 帧`);
+
+  // A5b 需求实现：球体放大时去掉内部小球，只保留线框棱球成为背景
+  const growBg = samples.filter((s) => s.t >= T_GROW_START + 0.5);
+  const innerLeft = growBg.filter((s) => (s.innerO ?? 0) > 1e-4).length;
+  check(
+    '放大就位后内部小球已移除（innerO≈0，只留线框棱球）',
+    growBg.length > 20 && innerLeft === 0,
+    `样本 ${growBg.length} 帧, 残留 ${innerLeft} 帧`
+  );
+  const morphS = samples.filter((s) => s.t >= 0.35 && s.t < T_GROW_START);
+  const innerAppeared = morphS.some((s) => (s.innerO ?? 0) > 0.01);
+  check(
+    '坍缩(morph)阶段内部小球曾作为内核出现，随后在放大时淡出',
+    morphS.length > 5 ? innerAppeared : true,
+    `坍缩段 ${morphS.length} 帧, 是否出现=${innerAppeared}`
+  );
 
   // A6 背景就位后仍在持续转动（未被冻结）
   const afterDone = samples.filter((s) => s.t >= T_DONE + 0.1);

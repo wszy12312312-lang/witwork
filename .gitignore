@@ -73,4 +73,4 @@ e2e_typeset_result.json
 start.bat.utf8lf.bak
 
 # ===== 启动动画验收产出（tools/intro_shots.mjs 的阶段截图）=====
-_shots/
+_shots*/

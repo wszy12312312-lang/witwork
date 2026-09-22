@@ -29,9 +29,9 @@ const ARCHIVE_SCALE = 3; // 档案体放大 3 倍（用户要求）
 const FIT_MARGIN = 1.45;
 const MAX_WIDEN = 1.3; // 极端竖屏最多拉远到 1.3 倍，避免图案大小跳变
 
-// 背景态的不透明度（动画结束后停在这两个值）
+// 背景态的不透明度：线框棱球停在 BG_WIRE_O；内部小球在放大阶段被移除，背景态不含内层 → 0
 const BG_WIRE_O = 0.5;
-const BG_INNER_O = 0.12;
+const BG_INNER_O = 0;
 // 启动动画期间棱球更亮更实，随放大收束回背景态
 const INTRO_WIRE_O = 0.92;
 const INTRO_INNER_O = 0.24;
@@ -240,7 +240,11 @@ function applySceneState(t: number) {
   // 指数式放大：从 S0 精确增长到 1
   group3d.scale.setScalar(S0 * Math.pow(1 / S0, growProgress(t)));
   wireMat.opacity = (INTRO_WIRE_O * (1 - settle) + BG_WIRE_O * settle) * ap;
-  innerMat.opacity = (INTRO_INNER_O * (1 - settle) + BG_INNER_O * settle) * ap;
+  // 内部小球（inner）：仅在「字 → 球」坍缩阶段作为致密内核短暂出现；
+  // 进入放大（grow）后即刻平滑淡出，只保留放大的线框棱球成为背景
+  //（需求：球体放大时把里面的小球去掉，只保留放大的球）。
+  const innerFade = smoothstep(T_GROW_START, T_GROW_START + 0.45, t);
+  innerMat.opacity = INTRO_INNER_O * ap * (1 - innerFade);
 }
 
 function animate(now?: number) {
@@ -286,6 +290,7 @@ function animate(now?: number) {
       spinY,
       scale: group3d ? group3d.scale.x : 1,
       wireO: wireMat ? wireMat.opacity : 0,
+      innerO: innerMat ? innerMat.opacity : 0,
       velY: BG_VEL_Y + SPIN_EXTRA_Y * p,
       velX: BG_VEL_X + SPIN_EXTRA_X * p,
     };
