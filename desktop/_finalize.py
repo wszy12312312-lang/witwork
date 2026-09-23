@@ -52,11 +52,20 @@ def repack():
     env.pop('ELECTRON_RUN_AS_NODE', None)
     env.pop('NODE_OPTIONS', None)          # 否则 harness 的 node shim 会拦截 electron-builder 的删除
     env['CSC_IDENTITY_AUTO_DISCOVERY'] = 'false'
-    p = subprocess.run([NODE, 'node_modules/electron-builder/cli.js', '--dir', '--win', '--publish', 'never'],
-                       cwd=os.path.join(R, 'desktop'), env=env, capture_output=True,
-                       text=True, encoding='utf-8', errors='replace')
-    tail = [l for l in (p.stdout or '').splitlines() if 'packaging' in l or 'error' in l.lower()]
-    print('  打包 rc=%s' % p.returncode)
+    # winCodeSign（内含 rcedit，嵌入 exe 图标必需）：国内直连 GitHub 会卡死，
+    # 优先走 npmmirror 镜像；若镜像也挂，可手动把缓存补成 Cache\winCodeSign\winCodeSign-2.6.0
+    env.setdefault('ELECTRON_BUILDER_BINARIES_MIRROR',
+                   'https://npmmirror.com/mirrors/electron-builder-binaries/')
+    log_path = os.path.join(R, 'desktop', 'pack_log.txt')
+    with open(log_path, 'w', encoding='utf-8', errors='replace') as f:
+        f.write('--- electron-builder --dir --win ---\n')
+        f.flush()
+        p = subprocess.run([NODE, 'node_modules/electron-builder/cli.js', '--dir', '--win', '--publish', 'never'],
+                           cwd=os.path.join(R, 'desktop'), env=env,
+                           stdout=f, stderr=subprocess.STDOUT, timeout=900)
+    tail = [l for l in open(log_path, encoding='utf-8', errors='replace').read().splitlines()
+            if 'packaging' in l or 'error' in l.lower() or 'cannot' in l.lower()]
+    print('  打包 rc=%s（全量日志: %s）' % (p.returncode, log_path))
     for l in tail[-3:]:
         print('    ', l.strip()[:140])
 

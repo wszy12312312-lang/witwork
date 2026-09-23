@@ -74,3 +74,5 @@ start.bat.utf8lf.bak
 
 # ===== 启动动画验收产出（tools/intro_shots.mjs 的阶段截图）=====
 _shots*/
+desktop/exe-backup-*.exe
+desktop/pack_log.txt

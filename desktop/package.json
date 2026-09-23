@@ -19,6 +19,7 @@
     "productName": "万维文 WitWork",
     "copyright": "Copyright © 2026 WitWork",
     "electronDist": "node_modules/electron/dist",
+    "icon": "assets/icon.ico",
     "files": [
       "electron-main.js",
       "preload.js",
@@ -51,7 +52,7 @@
         "nsis"
       ],
       "artifactName": "万维文WitWork-${version}-setup.${ext}",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": false,
