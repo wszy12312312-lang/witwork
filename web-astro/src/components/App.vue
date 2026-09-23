@@ -505,7 +505,19 @@ onBeforeUnmount(() => {
       <div class="brand mono" title="万维文 AI 写作：汇万千思路，写一纸文章。">万维文 · WITWORK</div>
       <div class="top-actions" v-magnet-rail="{ selector: 'button', strength: 5, scale: 1.06 }">
         <RareBell />
-        <button class="tb" :class="{ on: hudOn }" title="功能面板" @click="setHud(!hudOn)">终端</button>
+        <div class="hud-toggle">
+          <span class="hud-label">终端</span>
+          <button
+            class="hud-switch"
+            :class="{ on: hudOn }"
+            role="switch"
+            :aria-checked="String(hudOn)"
+            title="功能面板 开/关"
+            @click="setHud(!hudOn)"
+          >
+            <span class="knob"></span>
+          </button>
+        </div>
         <button class="tb" :class="{ on: store.aiOpen }" @click="store.aiOpen = !store.aiOpen">AI 助手</button>
         <button class="tb" @click="showSettings = true">设置</button>
         <div class="status" :class="{ on: store.connected }">
@@ -580,6 +592,72 @@ onBeforeUnmount(() => {
   border-color: var(--theme-accent);
   color: var(--theme-accent-hover);
   background: color-mix(in srgb, var(--theme-accent) 14%, transparent);
+}
+/* threeui skeuomorphic shader toggle：光泽金属旋钮 + 等离子辉光轨道 + 指针点亮（已调亮） */
+.hud-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hud-label {
+  font-size: 12px;
+  color: var(--theme-ink-soft);
+  letter-spacing: 0.04em;
+}
+.hud-switch {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  padding: 3px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--theme-line) 90%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--theme-ink) 26%, transparent), color-mix(in srgb, var(--theme-field) 80%, transparent));
+  box-shadow:
+    inset 0 2px 4px color-mix(in srgb, #000 42%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, #fff 8%, transparent);
+  cursor: pointer;
+  flex: none;
+  transition: background 0.3s var(--motion), box-shadow 0.3s var(--motion), border-color 0.3s var(--motion);
+}
+.hud-switch.on {
+  /* 白金色（铂金银白，微暖） */
+  border-color: color-mix(in srgb, #e8e4d6 95%, transparent);
+  background: linear-gradient(180deg, #fdfcf8 0%, #eae6d8 100%);
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 0 22px color-mix(in srgb, #f1eee3 90%, transparent),
+    0 0 44px color-mix(in srgb, #ded9c7 62%, transparent);
+}
+/* 等离子内辉（开启时轨道里流动的辉光，指针点亮感） */
+.hud-switch::before {
+  content: '';
+  position: absolute;
+  inset: 3px 22px 3px 3px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 50%, color-mix(in srgb, #dcd7c4 68%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s var(--motion), inset 0.34s var(--spring);
+  pointer-events: none;
+}
+.hud-switch.on::before {
+  opacity: 1;
+  inset: 3px 3px 3px 22px;
+}
+.hud-switch .knob {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff 0%, #e2e2e2 52%, #9a9a9a 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.85);
+  transform: translateX(0);
+  transition: transform 0.34s var(--spring), background 0.3s var(--motion);
+}
+.hud-switch.on .knob {
+  transform: translateX(20px);
+  background: radial-gradient(circle at 35% 30%, #ffffff 0%, #f2f0e8 52%, #c6c1ae 100%);
 }
 .brand {
   font-size: 15px;

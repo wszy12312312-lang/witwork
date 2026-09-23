@@ -907,6 +907,8 @@ watch(
   padding: 7px 18px;
   border-radius: var(--radius-sm);
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
   /* threeui：弹簧回弹 + 按下微缩 */
   transition: transform var(--dur-base) var(--spring), background 0.25s var(--motion),
     border-color 0.25s var(--motion), color 0.25s var(--motion), box-shadow 0.25s var(--motion);
@@ -916,9 +918,8 @@ watch(
   transform: scale(0.95);
   transition-duration: var(--dur-fast);
 }
+/* 纯色按钮：实底填充 + hover 扫光（恢复玻璃拟态之前的原样式） */
 .run {
-  position: relative;
-  overflow: hidden;
   background: var(--theme-solid-bg);
   color: var(--theme-solid-fg);
   border: 1px solid var(--theme-solid-bg);

@@ -515,10 +515,6 @@ function useDiscoveredModel(m: string) {
                 <option :value="true">开启</option>
               </select>
             </label>
-            <label class="fld check">
-              <input v-model="form.hud_texture" type="checkbox" />
-              <span>质感（扫线）</span>
-            </label>
           </div>
           <div class="wgrid">
             <label v-for="w in WIDGET_DEFS" :key="w.k" class="fld check">
